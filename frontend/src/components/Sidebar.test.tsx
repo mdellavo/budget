@@ -25,7 +25,6 @@ describe("Sidebar", () => {
       "Transactions",
       "Accounts",
       "Merchants",
-      "Merge duplicates",
       "Categories",
       "Imports",
       "Recurring",

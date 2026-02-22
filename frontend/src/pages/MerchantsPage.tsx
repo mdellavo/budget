@@ -299,7 +299,15 @@ export default function MerchantsPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-6">Merchants</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold text-gray-900">Merchants</h1>
+        <Link
+          to="/merchants/merge"
+          className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700"
+        >
+          Merge duplicates
+        </Link>
+      </div>
 
       {/* Filter bar */}
       <form
