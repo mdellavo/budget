@@ -30,9 +30,21 @@ const EMPTY_FILTERS = { date_from: "", date_to: "", category: "", subcategory: "
 type FormFilters = typeof EMPTY_FILTERS;
 
 const PALETTE = [
-  "#3b82f6", "#f97316", "#a855f7", "#14b8a6", "#eab308",
-  "#ec4899", "#6366f1", "#84cc16", "#ef4444", "#06b6d4",
-  "#f59e0b", "#8b5cf6", "#f43f5e", "#22c55e", "#0ea5e9",
+  "#3b82f6",
+  "#f97316",
+  "#a855f7",
+  "#14b8a6",
+  "#eab308",
+  "#ec4899",
+  "#6366f1",
+  "#84cc16",
+  "#ef4444",
+  "#06b6d4",
+  "#f59e0b",
+  "#8b5cf6",
+  "#f43f5e",
+  "#22c55e",
+  "#0ea5e9",
 ];
 
 // ── CategoryDonutChart ─────────────────────────────────────────────────────────
@@ -75,13 +87,7 @@ function CategoryDonutChart({ subcategories }: { subcategories: CategoryItem[] }
 
 // ── CategoryCard ───────────────────────────────────────────────────────────────
 
-function CategoryCard({
-  group,
-  subSortBy,
-}: {
-  group: CategoryGroup;
-  subSortBy: SubSortKey;
-}) {
+function CategoryCard({ group, subSortBy }: { group: CategoryGroup; subSortBy: SubSortKey }) {
   const sorted = useMemo(() => {
     return [...group.subcategories].sort((a, b) => {
       if (subSortBy === "total_amount") {
@@ -113,7 +119,9 @@ function CategoryCard({
             </Link>
           )}
         </h2>
-        <span className={`text-sm font-mono font-medium ${positive ? "text-green-600" : "text-red-600"}`}>
+        <span
+          className={`text-sm font-mono font-medium ${positive ? "text-green-600" : "text-red-600"}`}
+        >
           Total: {totalText}
         </span>
       </div>
@@ -168,7 +176,9 @@ function CategoryCard({
                     <td className="px-4 py-2 text-right text-gray-600 tabular-nums">
                       {sub.transaction_count}
                     </td>
-                    <td className={`px-4 py-2 text-right font-mono whitespace-nowrap ${positive ? "text-green-600" : "text-red-600"}`}>
+                    <td
+                      className={`px-4 py-2 text-right font-mono whitespace-nowrap ${positive ? "text-green-600" : "text-red-600"}`}
+                    >
                       {text}
                     </td>
                   </tr>
@@ -196,9 +206,9 @@ export default function CategoriesPage() {
     setLoading(true);
     setError(null);
     const apiFilters: CategoryFilters = { sort_by: "subcategory", sort_dir: "asc" };
-    if (formFilters.date_from)   apiFilters.date_from   = formFilters.date_from;
-    if (formFilters.date_to)     apiFilters.date_to     = formFilters.date_to;
-    if (formFilters.category)    apiFilters.category    = formFilters.category;
+    if (formFilters.date_from) apiFilters.date_from = formFilters.date_from;
+    if (formFilters.date_to) apiFilters.date_to = formFilters.date_to;
+    if (formFilters.category) apiFilters.category = formFilters.category;
     if (formFilters.subcategory) apiFilters.subcategory = formFilters.subcategory;
     try {
       const res = await listCategories(apiFilters);
@@ -345,7 +355,14 @@ export default function CategoriesPage() {
             fill="none"
             viewBox="0 0 24 24"
           >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
           Loading…

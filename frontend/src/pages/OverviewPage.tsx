@@ -4,7 +4,9 @@ import type { OverviewData, SankeyNode } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
 function formatCurrency(amount: string) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(parseFloat(amount));
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    parseFloat(amount)
+  );
 }
 
 export default function OverviewPage() {
@@ -23,14 +25,10 @@ export default function OverviewPage() {
     <div className="p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Overview</h1>
 
-      {loading && (
-        <div className="text-gray-500">Loading…</div>
-      )}
+      {loading && <div className="text-gray-500">Loading…</div>}
 
       {error && (
-        <div className="text-red-600 bg-red-50 border border-red-200 rounded p-4">
-          {error}
-        </div>
+        <div className="text-red-600 bg-red-50 border border-red-200 rounded p-4">{error}</div>
       )}
 
       {data && (
@@ -59,7 +57,11 @@ export default function OverviewPage() {
             <StatCard
               label="Savings Rate"
               value={data.savings_rate !== null ? `${data.savings_rate.toFixed(1)}%` : "—"}
-              colorClass={data.savings_rate !== null && data.savings_rate > 0 ? "text-green-600" : "text-gray-400"}
+              colorClass={
+                data.savings_rate !== null && data.savings_rate > 0
+                  ? "text-green-600"
+                  : "text-gray-400"
+              }
             />
           </div>
 
@@ -78,7 +80,9 @@ export default function OverviewPage() {
                 </summary>
                 <ul className="mt-2 ml-4 list-disc space-y-1">
                   <li>Band width represents dollar amount — thicker = more money</li>
-                  <li>Left: your income sources; Middle: total income pooled; Right: where it went</li>
+                  <li>
+                    Left: your income sources; Middle: total income pooled; Right: where it went
+                  </li>
                   <li>Hover over any band or node for exact amounts and percentages</li>
                   <li>Savings (green, far right) = income minus all expenses</li>
                 </ul>
@@ -98,7 +102,15 @@ export default function OverviewPage() {
   );
 }
 
-function StatCard({ label, value, colorClass }: { label: string; value: string; colorClass: string }) {
+function StatCard({
+  label,
+  value,
+  colorClass,
+}: {
+  label: string;
+  value: string;
+  colorClass: string;
+}) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-6">
       <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">{label}</p>
@@ -119,7 +131,15 @@ function SankeyChart({ incomeSources, expenseCategories, net, totalIncome }: San
   const netValue = parseFloat(net);
   const totalIncomeValue = parseFloat(totalIncome);
 
-  const { nodeLabels, nodeColors, linkSources, linkTargets, linkValues, linkColors, linkCustomdata } = useMemo(() => {
+  const {
+    nodeLabels,
+    nodeColors,
+    linkSources,
+    linkTargets,
+    linkValues,
+    linkColors,
+    linkCustomdata,
+  } = useMemo(() => {
     const I = incomeSources.length;
     const E = expenseCategories.length;
     const hasSavings = netValue > 0;
@@ -181,7 +201,15 @@ function SankeyChart({ incomeSources, expenseCategories, net, totalIncome }: San
       linkCustomdata.push(totalIncomeValue > 0 ? (netValue / totalIncomeValue) * 100 : 0);
     }
 
-    return { nodeLabels, nodeColors, linkSources, linkTargets, linkValues, linkColors, linkCustomdata };
+    return {
+      nodeLabels,
+      nodeColors,
+      linkSources,
+      linkTargets,
+      linkValues,
+      linkColors,
+      linkCustomdata,
+    };
   }, [incomeSources, expenseCategories, netValue, totalIncomeValue]);
 
   useEffect(() => {
@@ -202,7 +230,8 @@ function SankeyChart({ incomeSources, expenseCategories, net, totalIncome }: San
         value: linkValues,
         color: linkColors,
         customdata: linkCustomdata,
-        hovertemplate: "%{source.label} → %{target.label}<br>$%{value:,.2f} (%{customdata:.1f}%)<extra></extra>",
+        hovertemplate:
+          "%{source.label} → %{target.label}<br>$%{value:,.2f} (%{customdata:.1f}%)<extra></extra>",
       },
     };
 
@@ -225,9 +254,21 @@ function SankeyChart({ incomeSources, expenseCategories, net, totalIncome }: San
 }
 
 const PALETTE = [
-  "#3b82f6", "#f97316", "#a855f7", "#14b8a6", "#eab308",
-  "#ec4899", "#6366f1", "#84cc16", "#ef4444", "#06b6d4",
-  "#f59e0b", "#8b5cf6", "#f43f5e", "#22c55e", "#0ea5e9",
+  "#3b82f6",
+  "#f97316",
+  "#a855f7",
+  "#14b8a6",
+  "#eab308",
+  "#ec4899",
+  "#6366f1",
+  "#84cc16",
+  "#ef4444",
+  "#06b6d4",
+  "#f59e0b",
+  "#8b5cf6",
+  "#f43f5e",
+  "#22c55e",
+  "#0ea5e9",
 ];
 
 interface DonutChartProps {

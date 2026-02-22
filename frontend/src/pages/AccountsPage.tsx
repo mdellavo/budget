@@ -4,15 +4,21 @@ import { listAccounts } from "../api/client";
 import type { AccountFilters } from "../api/client";
 import type { AccountItem } from "../types";
 
-type SortKey = "name" | "institution" | "account_type" | "created_at" | "transaction_count" | "total_amount";
+type SortKey =
+  | "name"
+  | "institution"
+  | "account_type"
+  | "created_at"
+  | "transaction_count"
+  | "total_amount";
 
 const COLUMNS: { label: string; key: SortKey; rightAlign?: boolean }[] = [
-  { label: "Name",        key: "name" },
+  { label: "Name", key: "name" },
   { label: "Institution", key: "institution" },
-  { label: "Type",        key: "account_type" },
-  { label: "Created At",  key: "created_at" },
-  { label: "Txn Count",   key: "transaction_count", rightAlign: true },
-  { label: "Total Amount", key: "total_amount",      rightAlign: true },
+  { label: "Type", key: "account_type" },
+  { label: "Created At", key: "created_at" },
+  { label: "Txn Count", key: "transaction_count", rightAlign: true },
+  { label: "Total Amount", key: "total_amount", rightAlign: true },
 ];
 
 function formatAmount(amount: string): { text: string; positive: boolean } {
@@ -41,27 +47,30 @@ export default function AccountsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchFirstPage = useCallback(async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
-    setLoading(true);
-    setError(null);
-    setPages([]);
-    setNextCursor(null);
-    setHasMore(false);
-    const apiFilters: AccountFilters = { sort_by: sb, sort_dir: sd };
-    if (formFilters.name) apiFilters.name = formFilters.name;
-    if (formFilters.institution) apiFilters.institution = formFilters.institution;
-    if (formFilters.account_type) apiFilters.account_type = formFilters.account_type;
-    try {
-      const res = await listAccounts(apiFilters);
-      setPages([res.items]);
-      setNextCursor(res.next_cursor);
-      setHasMore(res.has_more);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load accounts");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchFirstPage = useCallback(
+    async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
+      setLoading(true);
+      setError(null);
+      setPages([]);
+      setNextCursor(null);
+      setHasMore(false);
+      const apiFilters: AccountFilters = { sort_by: sb, sort_dir: sd };
+      if (formFilters.name) apiFilters.name = formFilters.name;
+      if (formFilters.institution) apiFilters.institution = formFilters.institution;
+      if (formFilters.account_type) apiFilters.account_type = formFilters.account_type;
+      try {
+        const res = await listAccounts(apiFilters);
+        setPages([res.items]);
+        setNextCursor(res.next_cursor);
+        setHasMore(res.has_more);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load accounts");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchFirstPage(appliedFilters, sortBy, sortDir);
@@ -69,7 +78,7 @@ export default function AccountsPage() {
 
   function handleSort(key: SortKey) {
     if (key === sortBy) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(key);
       setSortDir("desc");
@@ -182,7 +191,10 @@ export default function AccountsPage() {
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               {COLUMNS.map(({ label, key, rightAlign }) => (
-                <th key={key} className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}>
+                <th
+                  key={key}
+                  className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}
+                >
                   <button
                     onClick={() => handleSort(key)}
                     className="flex items-center gap-1 hover:text-gray-800 transition-colors"
@@ -215,11 +227,7 @@ export default function AccountsPage() {
                         stroke="currentColor"
                         strokeWidth="4"
                       />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8H4z"
-                      />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                     </svg>
                     Loading…
                   </div>
@@ -248,8 +256,12 @@ export default function AccountsPage() {
                         {row.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-gray-600">{row.institution ?? <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-2 text-gray-600">{row.account_type ?? <span className="text-gray-300">—</span>}</td>
+                    <td className="px-4 py-2 text-gray-600">
+                      {row.institution ?? <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-gray-600">
+                      {row.account_type ?? <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-4 py-2 text-gray-600 tabular-nums">
                       {new Date(row.created_at).toLocaleDateString("en-US")}
                     </td>
@@ -295,11 +307,7 @@ export default function AccountsPage() {
                     stroke="currentColor"
                     strokeWidth="4"
                   />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v8H4z"
-                  />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 Loading…
               </>

@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { listTransactions, listMerchants, listCategories, parseQuery, updateTransaction } from "../api/client";
+import {
+  listTransactions,
+  listMerchants,
+  listCategories,
+  parseQuery,
+  updateTransaction,
+} from "../api/client";
 import type { TransactionFilters, TransactionUpdateBody } from "../api/client";
 import type { CategoryItem, TransactionItem } from "../types";
 import ComboBox from "../components/ComboBox";
@@ -8,12 +14,12 @@ import ComboBox from "../components/ComboBox";
 type SortKey = "date" | "amount" | "description" | "merchant" | "category" | "account";
 
 const COLUMNS: { label: string; key: SortKey; rightAlign?: boolean }[] = [
-  { label: "Date",                   key: "date" },
-  { label: "Description",            key: "description" },
-  { label: "Merchant",               key: "merchant" },
+  { label: "Date", key: "date" },
+  { label: "Description", key: "description" },
+  { label: "Merchant", key: "merchant" },
   { label: "Category / Subcategory", key: "category" },
-  { label: "Amount",                 key: "amount", rightAlign: true },
-  { label: "Account",                key: "account" },
+  { label: "Amount", key: "amount", rightAlign: true },
+  { label: "Account", key: "account" },
 ];
 
 function formatAmount(amount: string): { text: string; positive: boolean } {
@@ -46,36 +52,36 @@ type FormFilters = typeof EMPTY_FILTERS;
 
 function filtersFromParams(p: URLSearchParams): FormFilters {
   return {
-    date_from:   p.get("date_from")   ?? "",
-    date_to:     p.get("date_to")     ?? "",
-    merchant:    p.get("merchant")    ?? "",
+    date_from: p.get("date_from") ?? "",
+    date_to: p.get("date_to") ?? "",
+    merchant: p.get("merchant") ?? "",
     description: p.get("description") ?? "",
-    amount_min:  p.get("amount_min")  ?? "",
-    amount_max:  p.get("amount_max")  ?? "",
-    category:    p.get("category")    ?? "",
+    amount_min: p.get("amount_min") ?? "",
+    amount_max: p.get("amount_max") ?? "",
+    category: p.get("category") ?? "",
     subcategory: p.get("subcategory") ?? "",
-    account:      p.get("account")      ?? "",
-    import_id:     p.get("import_id")     ?? "",
-    is_recurring:  p.get("is_recurring")  ?? "",
+    account: p.get("account") ?? "",
+    import_id: p.get("import_id") ?? "",
+    is_recurring: p.get("is_recurring") ?? "",
     uncategorized: p.get("uncategorized") ?? "",
   };
 }
 
 function buildParams(f: FormFilters, sb: SortKey, sd: "asc" | "desc"): URLSearchParams {
   const p = new URLSearchParams();
-  if (f.date_from)   p.set("date_from",   f.date_from);
-  if (f.date_to)     p.set("date_to",     f.date_to);
-  if (f.merchant)    p.set("merchant",    f.merchant);
+  if (f.date_from) p.set("date_from", f.date_from);
+  if (f.date_to) p.set("date_to", f.date_to);
+  if (f.merchant) p.set("merchant", f.merchant);
   if (f.description) p.set("description", f.description);
-  if (f.amount_min)  p.set("amount_min",  f.amount_min);
-  if (f.amount_max)  p.set("amount_max",  f.amount_max);
-  if (f.category)    p.set("category",    f.category);
+  if (f.amount_min) p.set("amount_min", f.amount_min);
+  if (f.amount_max) p.set("amount_max", f.amount_max);
+  if (f.category) p.set("category", f.category);
   if (f.subcategory) p.set("subcategory", f.subcategory);
-  if (f.account)     p.set("account",     f.account);
-  if (f.import_id)     p.set("import_id",     f.import_id);
-  if (f.is_recurring)  p.set("is_recurring",  f.is_recurring);
+  if (f.account) p.set("account", f.account);
+  if (f.import_id) p.set("import_id", f.import_id);
+  if (f.is_recurring) p.set("is_recurring", f.is_recurring);
   if (f.uncategorized) p.set("uncategorized", f.uncategorized);
-  if (sb !== "date")  p.set("sort_by",  sb);
+  if (sb !== "date") p.set("sort_by", sb);
   if (sd !== "desc") p.set("sort_dir", sd);
   return p;
 }
@@ -124,7 +130,9 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
 
   // Load all category rows on mount
   useEffect(() => {
-    listCategories().then((res) => setAllCategoryRows(res.items)).catch(() => {});
+    listCategories()
+      .then((res) => setAllCategoryRows(res.items))
+      .catch(() => {});
   }, []);
 
   // Debounced merchant suggestions
@@ -153,9 +161,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
   const categoryQuery = form.category.toLowerCase();
   const categorySuggestions = Array.from(
     new Set(
-      allCategoryRows
-        .map((r) => r.category)
-        .filter((c) => c.toLowerCase().includes(categoryQuery))
+      allCategoryRows.map((r) => r.category).filter((c) => c.toLowerCase().includes(categoryQuery))
     )
   );
 
@@ -219,7 +225,11 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full" role="dialog" aria-modal="true">
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-lg w-full"
+        role="dialog"
+        aria-modal="true"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Edit Transaction</h2>
@@ -228,8 +238,17 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
             className="text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
             aria-label="Close"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                clipRule="evenodd"
+              />
             </svg>
           </button>
         </div>
@@ -237,10 +256,16 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         {/* Meta info */}
         <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 text-sm text-gray-600 space-y-0.5">
           <div className="flex gap-4">
-            <span><span className="font-medium">Date:</span> {tx.date}</span>
-            <span><span className="font-medium">Amount:</span> {amountText}</span>
+            <span>
+              <span className="font-medium">Date:</span> {tx.date}
+            </span>
+            <span>
+              <span className="font-medium">Amount:</span> {amountText}
+            </span>
           </div>
-          <div><span className="font-medium">Account:</span> {tx.account}</div>
+          <div>
+            <span className="font-medium">Account:</span> {tx.account}
+          </div>
         </div>
 
         {/* Form */}
@@ -322,6 +347,263 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
 }
 
 // ---------------------------------------------------------------------------
+// TransactionDetailModal
+// ---------------------------------------------------------------------------
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex py-2.5 border-b border-gray-100 last:border-0">
+      <dt className="w-32 shrink-0 text-sm font-medium text-gray-500">{label}</dt>
+      <dd className="text-sm text-gray-900 min-w-0 break-words">{children}</dd>
+    </div>
+  );
+}
+
+interface TransactionDetailModalProps {
+  tx: TransactionItem;
+  onClose: () => void;
+  onEdit: (tx: TransactionItem) => void;
+}
+
+function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalProps) {
+  const { text: amountText, positive } = formatAmount(tx.amount);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full"
+        role="dialog"
+        aria-modal="true"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+          <h2 className="text-base font-semibold text-gray-900">Transaction Details</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
+            aria-label="Close"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {/* Fields */}
+        <dl className="px-5 py-1">
+          <Row label="Date">{tx.date}</Row>
+          <Row label="Description">{tx.description}</Row>
+          <Row label="Amount">
+            <span
+              className={`font-mono font-medium ${positive ? "text-green-600" : "text-red-600"}`}
+            >
+              {amountText}
+            </span>
+          </Row>
+          <Row label="Account">{tx.account}</Row>
+          <Row label="Merchant">{tx.merchant ?? <span className="text-gray-400">—</span>}</Row>
+          <Row label="Category">{tx.category ?? <span className="text-gray-400">—</span>}</Row>
+          <Row label="Subcategory">
+            {tx.subcategory ?? <span className="text-gray-400">—</span>}
+          </Row>
+          <Row label="Notes">{tx.notes ?? <span className="text-gray-400">—</span>}</Row>
+          <Row label="Recurring">
+            {tx.is_recurring ? (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">
+                Yes
+              </span>
+            ) : (
+              <span className="text-gray-400">No</span>
+            )}
+          </Row>
+          <Row label="ID">
+            <span className="font-mono text-gray-400 text-xs">{tx.id}</span>
+          </Row>
+        </dl>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() => onEdit(tx)}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+            </svg>
+            Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BulkEditBar
+// ---------------------------------------------------------------------------
+
+interface BulkEditBarProps {
+  count: number;
+  onApply: (updates: { merchant: string; category: string; subcategory: string }) => void;
+  onClear: () => void;
+  saving: boolean;
+  error: string | null;
+}
+
+function BulkEditBar({ count, onApply, onClear, saving, error }: BulkEditBarProps) {
+  const [form, setForm] = useState({ merchant: "", category: "", subcategory: "" });
+  const [merchantSuggestions, setMerchantSuggestions] = useState<string[]>([]);
+  const [allCategoryRows, setAllCategoryRows] = useState<CategoryItem[]>([]);
+
+  useEffect(() => {
+    listCategories()
+      .then((res) => setAllCategoryRows(res.items))
+      .catch(() => {});
+  }, []);
+
+  const merchantDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (merchantDebounce.current) clearTimeout(merchantDebounce.current);
+    const query = form.merchant.trim();
+    if (!query) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMerchantSuggestions([]);
+      return;
+    }
+    merchantDebounce.current = setTimeout(async () => {
+      try {
+        const res = await listMerchants({ name: query, limit: 20 });
+        setMerchantSuggestions(res.items.map((m) => m.name));
+      } catch {
+        setMerchantSuggestions([]);
+      }
+    }, 300);
+    return () => {
+      if (merchantDebounce.current) clearTimeout(merchantDebounce.current);
+    };
+  }, [form.merchant]);
+
+  const categoryQuery = form.category.toLowerCase();
+  const categorySuggestions = Array.from(
+    new Set(
+      allCategoryRows.map((r) => r.category).filter((c) => c.toLowerCase().includes(categoryQuery))
+    )
+  );
+
+  const subcategoryQuery = form.subcategory.toLowerCase();
+  const subcategorySuggestions = Array.from(
+    new Set(
+      allCategoryRows
+        .filter((r) => !form.category || r.category === form.category)
+        .map((r) => r.subcategory)
+        .filter((s) => s.toLowerCase().includes(subcategoryQuery))
+    )
+  );
+
+  function setField(key: keyof typeof form, value: string) {
+    if (key === "category") {
+      setForm((prev) => ({ ...prev, category: value, subcategory: "" }));
+    } else {
+      setForm((prev) => ({ ...prev, [key]: value }));
+    }
+  }
+
+  const allEmpty = !form.merchant.trim() && !form.category.trim() && !form.subcategory.trim();
+
+  const inputClass =
+    "border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500";
+
+  return (
+    <div className="sticky top-0 z-10 mb-3 bg-indigo-50 border border-indigo-200 rounded-md px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
+      <span className="text-sm font-medium text-indigo-700 shrink-0">{count} selected</span>
+      <div className="flex items-center gap-1.5">
+        <label className="text-xs text-gray-500 font-medium">Merchant</label>
+        <ComboBox
+          value={form.merchant}
+          onChange={(v) => setField("merchant", v)}
+          suggestions={merchantSuggestions}
+          placeholder="(no change)"
+          className={inputClass}
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <label className="text-xs text-gray-500 font-medium">Category</label>
+        <ComboBox
+          value={form.category}
+          onChange={(v) => setField("category", v)}
+          suggestions={categorySuggestions}
+          placeholder="(no change)"
+          className={inputClass}
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <label className="text-xs text-gray-500 font-medium">Subcategory</label>
+        <ComboBox
+          value={form.subcategory}
+          onChange={(v) => setField("subcategory", v)}
+          suggestions={subcategorySuggestions}
+          placeholder="(no change)"
+          className={inputClass}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => onApply(form)}
+        disabled={allEmpty || saving}
+        className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      >
+        {saving ? "Applying…" : "Apply"}
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        className="text-gray-400 hover:text-gray-700 focus:outline-none text-lg leading-none"
+        aria-label="Clear selection"
+        title="Clear selection"
+      >
+        ✕
+      </button>
+      {error && <span className="text-sm text-red-600">{error}</span>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // TransactionsPage
 // ---------------------------------------------------------------------------
 
@@ -329,7 +611,7 @@ export default function TransactionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const appliedFilters = filtersFromParams(searchParams);
-  const sortBy  = (searchParams.get("sort_by")  ?? "date") as SortKey;
+  const sortBy = (searchParams.get("sort_by") ?? "date") as SortKey;
   const sortDir = (searchParams.get("sort_dir") ?? "desc") as "asc" | "desc";
 
   const [filters, setFilters] = useState<FormFilters>(() => filtersFromParams(searchParams));
@@ -354,15 +636,15 @@ export default function TransactionsPage() {
       const { filters: parsed, explanation } = await parseQuery(nlQuery.trim());
       const merged: FormFilters = {
         ...EMPTY_FILTERS,
-        date_from:    parsed.date_from    ?? "",
-        date_to:      parsed.date_to      ?? "",
-        merchant:     parsed.merchant     ?? "",
-        description:  parsed.description  ?? "",
-        amount_min:   parsed.amount_min   ?? "",
-        amount_max:   parsed.amount_max   ?? "",
-        category:     parsed.category     ?? "",
-        subcategory:  parsed.subcategory  ?? "",
-        account:      parsed.account      ?? "",
+        date_from: parsed.date_from ?? "",
+        date_to: parsed.date_to ?? "",
+        merchant: parsed.merchant ?? "",
+        description: parsed.description ?? "",
+        amount_min: parsed.amount_min ?? "",
+        amount_max: parsed.amount_max ?? "",
+        category: parsed.category ?? "",
+        subcategory: parsed.subcategory ?? "",
+        account: parsed.account ?? "",
         is_recurring: parsed.is_recurring != null ? String(parsed.is_recurring) : "",
       };
       setFilters(merged);
@@ -384,26 +666,39 @@ export default function TransactionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [editingTx, setEditingTx] = useState<TransactionItem | null>(null);
+  const [viewingTx, setViewingTx] = useState<TransactionItem | null>(null);
 
-  const fetchFirstPage = useCallback(async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
-    setLoading(true);
-    setError(null);
-    setPages([]);
-    setNextCursor(null);
-    setHasMore(false);
-    setTotalCount(null);
-    try {
-      const res = await listTransactions({ ...toApiFilters(formFilters), sort_by: sb, sort_dir: sd });
-      setPages([res.items]);
-      setNextCursor(res.next_cursor);
-      setHasMore(res.has_more);
-      setTotalCount(res.total_count);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load transactions");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  const fetchFirstPage = useCallback(
+    async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
+      setLoading(true);
+      setError(null);
+      setPages([]);
+      setSelectedIds(new Set());
+      setNextCursor(null);
+      setHasMore(false);
+      setTotalCount(null);
+      try {
+        const res = await listTransactions({
+          ...toApiFilters(formFilters),
+          sort_by: sb,
+          sort_dir: sd,
+        });
+        setPages([res.items]);
+        setNextCursor(res.next_cursor);
+        setHasMore(res.has_more);
+        setTotalCount(res.total_count);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load transactions");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchFirstPage(appliedFilters, sortBy, sortDir);
@@ -450,17 +745,69 @@ export default function TransactionsPage() {
 
   function handleSaved(updated: TransactionItem) {
     setPages((prev) =>
-      prev.map((page) =>
-        page.map((row) => (row.id === updated.id ? updated : row))
-      )
+      prev.map((page) => page.map((row) => (row.id === updated.id ? updated : row)))
     );
     setEditingTx(null);
+    setViewingTx(null);
+  }
+
+  async function handleBulkApply(updates: {
+    merchant: string;
+    category: string;
+    subcategory: string;
+  }) {
+    setBulkSaving(true);
+    setBulkError(null);
+    const ids = [...selectedIds];
+    let failed = 0;
+    for (const id of ids) {
+      const tx = allRows.find((r) => r.id === id)!;
+      try {
+        const updated = await updateTransaction(id, {
+          description: tx.description,
+          merchant_name: updates.merchant.trim() || tx.merchant || null,
+          category: updates.category.trim() || tx.category || null,
+          subcategory: updates.subcategory.trim() || tx.subcategory || null,
+          notes: tx.notes,
+        });
+        setPages((prev) =>
+          prev.map((page) => page.map((r) => (r.id === updated.id ? updated : r)))
+        );
+      } catch {
+        failed++;
+      }
+    }
+    setBulkSaving(false);
+    if (failed === 0) {
+      setSelectedIds(new Set());
+    } else {
+      setBulkError(`${failed} transaction(s) failed to update`);
+    }
   }
 
   const allRows = pages.flat();
 
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const allSelected = allRows.length > 0 && allRows.every((r) => selectedIds.has(r.id));
+  const someSelected = allRows.some((r) => selectedIds.has(r.id));
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
   return (
     <div className="p-8">
+      {viewingTx && !editingTx && (
+        <TransactionDetailModal
+          tx={viewingTx}
+          onClose={() => setViewingTx(null)}
+          onEdit={(tx) => {
+            setViewingTx(null);
+            setEditingTx(tx);
+          }}
+        />
+      )}
       {editingTx && (
         <EditTransactionModal
           tx={editingTx}
@@ -495,8 +842,20 @@ export default function TransactionsPage() {
           >
             {nlLoading ? (
               <>
-                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <svg
+                  className="animate-spin h-4 w-4"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 Asking…
@@ -509,8 +868,17 @@ export default function TransactionsPage() {
         {nlExplanation && (
           <div className="mt-2 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-medium">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-3.5 w-3.5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
               </svg>
               {nlExplanation}
             </span>
@@ -524,9 +892,7 @@ export default function TransactionsPage() {
             </button>
           </div>
         )}
-        {nlError && (
-          <p className="mt-2 text-xs text-red-600">{nlError}</p>
-        )}
+        {nlError && <p className="mt-2 text-xs text-red-600">{nlError}</p>}
       </form>
 
       {/* Filter bar */}
@@ -673,13 +1039,41 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      {selectedIds.size > 0 && (
+        <BulkEditBar
+          count={selectedIds.size}
+          onApply={handleBulkApply}
+          onClear={() => setSelectedIds(new Set())}
+          saving={bulkSaving}
+          error={bulkError}
+        />
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto rounded-md border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
+              <th className="px-4 py-3 w-10">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => {
+                    if (allSelected) {
+                      setSelectedIds(new Set());
+                    } else {
+                      setSelectedIds(new Set(allRows.map((r) => r.id)));
+                    }
+                  }}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+              </th>
               {COLUMNS.map(({ label, key, rightAlign }) => (
-                <th key={key} className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}>
+                <th
+                  key={key}
+                  className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}
+                >
                   <button
                     onClick={() => handleSort(key)}
                     className="flex items-center gap-1 hover:text-gray-800 transition-colors"
@@ -697,7 +1091,7 @@ export default function TransactionsPage() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-10 text-center text-gray-400">
                   <div className="flex items-center justify-center gap-2">
                     <svg
                       className="animate-spin h-4 w-4 text-indigo-500"
@@ -713,11 +1107,7 @@ export default function TransactionsPage() {
                         stroke="currentColor"
                         strokeWidth="4"
                       />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8H4z"
-                      />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                     </svg>
                     Loading…
                   </div>
@@ -725,21 +1115,36 @@ export default function TransactionsPage() {
               </tr>
             ) : allRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">
                   No transactions found.
                 </td>
               </tr>
             ) : (
               allRows.map((row) => {
                 const { text, positive } = formatAmount(row.amount);
-                const category = [row.category, row.subcategory]
-                  .filter(Boolean)
-                  .join(" / ");
+                const category = [row.category, row.subcategory].filter(Boolean).join(" / ");
                 return (
-                  <tr key={row.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 whitespace-nowrap text-gray-600">
-                      {row.date}
+                  <tr
+                    key={row.id}
+                    className={`cursor-pointer ${selectedIds.has(row.id) ? "bg-indigo-50" : "hover:bg-gray-50"}`}
+                    onClick={() => setViewingTx(row)}
+                  >
+                    <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => {
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(row.id)) next.delete(row.id);
+                            else next.add(row.id);
+                            return next;
+                          });
+                        }}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
                     </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-gray-600">{row.date}</td>
                     <td className="px-4 py-2 text-gray-800">
                       {row.description}
                       {row.is_recurring && (
@@ -762,14 +1167,19 @@ export default function TransactionsPage() {
                       {text}
                     </td>
                     <td className="px-4 py-2 text-gray-600">{row.account}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => setEditingTx(row)}
                         className="text-gray-400 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
                         aria-label="Edit transaction"
                         title="Edit"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                        >
                           <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
                         </svg>
                       </button>
@@ -811,11 +1221,7 @@ export default function TransactionsPage() {
                     stroke="currentColor"
                     strokeWidth="4"
                   />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v8H4z"
-                  />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 Loading…
               </>

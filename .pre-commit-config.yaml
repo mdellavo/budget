@@ -1,0 +1,51 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        additional_dependencies: []
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+
+  - repo: local
+    hooks:
+      - id: frontend-typecheck
+        name: TypeScript type check
+        language: system
+        entry: bash -c 'cd frontend && npm run typecheck'
+        files: ^frontend/
+        pass_filenames: false
+
+      - id: frontend-eslint
+        name: ESLint
+        language: system
+        entry: bash -c 'cd frontend && npm run lint'
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: frontend-prettier
+        name: Prettier
+        language: system
+        entry: bash -c 'cd frontend && npm run format:check'
+        files: ^frontend/src/.*\.(ts|tsx|css|json)$
+        pass_filenames: false

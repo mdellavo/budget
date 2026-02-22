@@ -5,10 +5,11 @@ const NAV = [
   { to: "/transactions", label: "Transactions", icon: "↕" },
   { to: "/accounts", label: "Accounts", icon: "🏦" },
   { to: "/merchants", label: "Merchants", icon: "🏪" },
+  { to: "/merchants/merge", label: "Merge duplicates", icon: "⇒" },
   { to: "/categories", label: "Categories", icon: "🏷️" },
-  { to: "/imports",   label: "Imports",   icon: "📋" },
+  { to: "/imports", label: "Imports", icon: "📋" },
   { to: "/recurring", label: "Recurring", icon: "🔁" },
-  { to: "/monthly",   label: "Monthly",   icon: "📅" },
+  { to: "/monthly", label: "Monthly", icon: "📅" },
 ];
 
 export default function Sidebar() {

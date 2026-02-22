@@ -6,7 +6,9 @@ import type { RecurringItem } from "../types";
 const TODAY = new Date().toISOString().slice(0, 10);
 
 function formatCurrency(amount: string) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(parseFloat(amount));
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    parseFloat(amount)
+  );
 }
 
 function formatDate(iso: string) {
@@ -48,7 +50,16 @@ export default function RecurringPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {["Merchant", "Category", "Typical Amount", "Frequency", "/month", "Occurrences", "Last Charge", "Est. Next"].map((col) => (
+                {[
+                  "Merchant",
+                  "Category",
+                  "Typical Amount",
+                  "Frequency",
+                  "/month",
+                  "Occurrences",
+                  "Last Charge",
+                  "Est. Next",
+                ].map((col) => (
                   <th
                     key={col}
                     className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide"
@@ -77,7 +88,9 @@ export default function RecurringPage() {
                     <td className="px-4 py-3 text-gray-900">{formatCurrency(item.monthly_cost)}</td>
                     <td className="px-4 py-3 text-gray-600">{item.occurrences}</td>
                     <td className="px-4 py-3 text-gray-600">{formatDate(item.last_charge)}</td>
-                    <td className={`px-4 py-3 ${isOverdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
+                    <td
+                      className={`px-4 py-3 ${isOverdue ? "text-red-600 font-bold" : "text-gray-600"}`}
+                    >
                       {formatDate(item.next_estimated)}
                     </td>
                   </tr>

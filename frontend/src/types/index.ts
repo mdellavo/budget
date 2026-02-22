@@ -124,12 +124,12 @@ export interface RecurringItem {
   merchant: string;
   merchant_id: number | null;
   category: string | null;
-  amount: string;          // median absolute value, positive
+  amount: string; // median absolute value, positive
   frequency: "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
   occurrences: number;
-  last_charge: string;     // ISO date
-  next_estimated: string;  // ISO date
-  monthly_cost: string;    // monthly equivalent, positive
+  last_charge: string; // ISO date
+  next_estimated: string; // ISO date
+  monthly_cost: string; // monthly equivalent, positive
 }
 
 export interface RecurringData {
@@ -165,7 +165,7 @@ export interface MonthlyReport {
 
 export interface SankeyNode {
   name: string;
-  amount: string;   // numeric string, may be negative for expense_categories
+  amount: string; // numeric string, may be negative for expense_categories
 }
 
 export interface OverviewData {

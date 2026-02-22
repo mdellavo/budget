@@ -7,11 +7,11 @@ import type { ImportItem, ImportCsvResponse, ColumnMapping } from "../types";
 type SortKey = "filename" | "account" | "imported_at" | "row_count" | "transaction_count";
 
 const COLUMNS: { label: string; key: SortKey; rightAlign?: boolean }[] = [
-  { label: "Filename",    key: "filename" },
-  { label: "Account",     key: "account" },
+  { label: "Filename", key: "filename" },
+  { label: "Account", key: "account" },
   { label: "Imported At", key: "imported_at" },
-  { label: "Rows",        key: "row_count",         rightAlign: true },
-  { label: "Txn Count",  key: "transaction_count",  rightAlign: true },
+  { label: "Rows", key: "row_count", rightAlign: true },
+  { label: "Txn Count", key: "transaction_count", rightAlign: true },
 ];
 
 const EMPTY_FILTERS = { filename: "", account: "" };
@@ -81,26 +81,29 @@ export default function ImportsPage() {
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchFirstPage = useCallback(async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
-    setLoading(true);
-    setError(null);
-    setPages([]);
-    setNextCursor(null);
-    setHasMore(false);
-    const apiFilters: ImportFilters = { sort_by: sb, sort_dir: sd };
-    if (formFilters.filename) apiFilters.filename = formFilters.filename;
-    if (formFilters.account) apiFilters.account = formFilters.account;
-    try {
-      const res = await listImports(apiFilters);
-      setPages([res.items]);
-      setNextCursor(res.next_cursor);
-      setHasMore(res.has_more);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load imports");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchFirstPage = useCallback(
+    async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
+      setLoading(true);
+      setError(null);
+      setPages([]);
+      setNextCursor(null);
+      setHasMore(false);
+      const apiFilters: ImportFilters = { sort_by: sb, sort_dir: sd };
+      if (formFilters.filename) apiFilters.filename = formFilters.filename;
+      if (formFilters.account) apiFilters.account = formFilters.account;
+      try {
+        const res = await listImports(apiFilters);
+        setPages([res.items]);
+        setNextCursor(res.next_cursor);
+        setHasMore(res.has_more);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load imports");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchFirstPage(appliedFilters, sortBy, sortDir);
@@ -121,11 +124,19 @@ export default function ImportsPage() {
       }
     }, 2000);
     return () => clearInterval(id);
-  }, [importState.status, importState.status === "success" ? importState.data.csv_import_id : null, enrichmentComplete, fetchFirstPage, appliedFilters, sortBy, sortDir]);
+  }, [
+    importState.status,
+    importState.status === "success" ? importState.data.csv_import_id : null,
+    enrichmentComplete,
+    fetchFirstPage,
+    appliedFilters,
+    sortBy,
+    sortDir,
+  ]);
 
   function handleSort(key: SortKey) {
     if (key === sortBy) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(key);
       setSortDir("desc");
@@ -202,7 +213,7 @@ export default function ImportsPage() {
   }
 
   const allRows = pages.flat();
-  const hasInProgress = allRows.some(r => r.status === "in-progress");
+  const hasInProgress = allRows.some((r) => r.status === "in-progress");
 
   useEffect(() => {
     if (!hasInProgress) return;
@@ -219,7 +230,7 @@ export default function ImportsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">Imports</h1>
         <button
-          onClick={() => setShowImportForm(f => !f)}
+          onClick={() => setShowImportForm((f) => !f)}
           className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           ⬆ Import CSV
@@ -248,7 +259,9 @@ export default function ImportsPage() {
                   <div className="w-full bg-green-200 rounded-full h-2">
                     <div
                       className="bg-green-600 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, (enrichedRows / importState.data.rows_imported) * 100)}%` }}
+                      style={{
+                        width: `${Math.min(100, (enrichedRows / importState.data.rows_imported) * 100)}%`,
+                      }}
                     />
                   </div>
                 </div>
@@ -262,7 +275,10 @@ export default function ImportsPage() {
                 <dd className="text-green-900">#{importState.data.csv_import_id}</dd>
               </dl>
               <p className="text-sm font-medium text-green-800">Detected column mapping</p>
-              <ColumnMappingTable columns={importState.data.columns} mapping={importState.data.column_mapping} />
+              <ColumnMappingTable
+                columns={importState.data.columns}
+                mapping={importState.data.column_mapping}
+              />
               <div className="mt-5 flex gap-4">
                 <button
                   onClick={handleImportReset}
@@ -281,7 +297,10 @@ export default function ImportsPage() {
           ) : (
             <form onSubmit={handleImportSubmit} className="space-y-5">
               <div>
-                <label htmlFor="account-name" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="account-name"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Account name
                 </label>
                 <input
@@ -295,7 +314,10 @@ export default function ImportsPage() {
                 />
               </div>
               <div>
-                <label htmlFor="account-type" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="account-type"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Account type <span className="text-gray-400 font-normal">(optional)</span>
                 </label>
                 <select
@@ -334,8 +356,20 @@ export default function ImportsPage() {
                   className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {isImporting && (
-                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <svg
+                      className="animate-spin h-4 w-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                     </svg>
                   )}
@@ -356,7 +390,10 @@ export default function ImportsPage() {
       )}
 
       {/* Filter bar */}
-      <form onSubmit={handleApply} className="mb-6 bg-white border border-gray-200 rounded-md shadow-sm p-4">
+      <form
+        onSubmit={handleApply}
+        className="mb-6 bg-white border border-gray-200 rounded-md shadow-sm p-4"
+      >
         <div className="flex gap-3 flex-wrap items-end">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Filename</label>
@@ -409,10 +446,18 @@ export default function ImportsPage() {
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               {COLUMNS.map(({ label, key, rightAlign }) => (
-                <th key={key} className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}>
-                  <button onClick={() => handleSort(key)} className="flex items-center gap-1 hover:text-gray-800 transition-colors">
+                <th
+                  key={key}
+                  className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}
+                >
+                  <button
+                    onClick={() => handleSort(key)}
+                    className="flex items-center gap-1 hover:text-gray-800 transition-colors"
+                  >
                     {label}
-                    <span className="text-gray-400">{sortBy === key ? (sortDir === "asc" ? "↑" : "↓") : ""}</span>
+                    <span className="text-gray-400">
+                      {sortBy === key ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                    </span>
                   </button>
                 </th>
               ))}
@@ -426,8 +471,20 @@ export default function ImportsPage() {
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
                   <div className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <svg
+                      className="animate-spin h-4 w-4 text-indigo-500"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                     </svg>
                     Loading…
@@ -451,11 +508,15 @@ export default function ImportsPage() {
               allRows.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-gray-800 font-mono text-xs">{row.filename}</td>
-                  <td className="px-4 py-2 text-gray-600">{row.account ?? <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-2 text-gray-600">
+                    {row.account ?? <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-2 text-gray-600 tabular-nums whitespace-nowrap">
                     {new Date(row.imported_at).toLocaleString()}
                   </td>
-                  <td className="px-4 py-2 text-right text-gray-600 tabular-nums">{row.row_count}</td>
+                  <td className="px-4 py-2 text-right text-gray-600 tabular-nums">
+                    {row.row_count}
+                  </td>
                   <td className="px-4 py-2 text-right text-gray-600 tabular-nums">
                     <Link
                       to={`/transactions?import_id=${row.id}`}
@@ -480,7 +541,9 @@ export default function ImportsPage() {
                         <div className="w-full bg-gray-200 rounded-full h-1.5">
                           <div
                             className="bg-indigo-500 h-1.5 rounded-full transition-all duration-500"
-                            style={{ width: `${Math.min(100, (row.enriched_rows / row.row_count) * 100)}%` }}
+                            style={{
+                              width: `${Math.min(100, (row.enriched_rows / row.row_count) * 100)}%`,
+                            }}
                           />
                         </div>
                       </div>
@@ -503,8 +566,20 @@ export default function ImportsPage() {
           >
             {loadingMore ? (
               <>
-                <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <svg
+                  className="animate-spin h-4 w-4 text-gray-500"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 Loading…
