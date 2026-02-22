@@ -4,6 +4,7 @@ import OverviewPage from "./pages/OverviewPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import AccountsPage from "./pages/AccountsPage";
 import MerchantsPage from "./pages/MerchantsPage";
+import MerchantMergePage from "./pages/MerchantMergePage";
 import ImportsPage from "./pages/ImportsPage";
 import RecurringPage from "./pages/RecurringPage";
 import MonthlyPage from "./pages/MonthlyPage";
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/merchants" element={<MerchantsPage />} />
+            <Route path="/merchants/merge" element={<MerchantMergePage />} />
             <Route path="/imports" element={<ImportsPage />} />
             <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/monthly" element={<MonthlyPage />} />

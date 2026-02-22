@@ -1,0 +1,774 @@
+"""Tests for FastAPI endpoints in budget/main.py.
+
+All tests use the `client` fixture (httpx AsyncClient with ASGITransport).
+AI endpoints use `mocker` to patch module-level singletons.
+"""
+
+import io
+from datetime import date
+from decimal import Decimal
+from unittest.mock import AsyncMock
+
+import pytest
+
+from budget.main import _classify_gap, parse_amount, parse_date
+from budget.models import CsvImport
+
+# ---------------------------------------------------------------------------
+# Merchants
+# ---------------------------------------------------------------------------
+
+
+class TestMerchants:
+    async def test_list_empty(self, client):
+        r = await client.get("/merchants")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+        assert data["has_more"] is False
+
+    async def test_list_with_data(self, client, make_merchant):
+        await make_merchant("Starbucks", "Seattle, WA")
+        r = await client.get("/merchants")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["name"] == "Starbucks"
+        assert item["location"] == "Seattle, WA"
+        assert "transaction_count" in item
+        assert "total_amount" in item
+
+    async def test_list_name_filter(self, client, make_merchant):
+        await make_merchant("Starbucks")
+        await make_merchant("Target")
+        r = await client.get("/merchants", params={"name": "star"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["name"] == "Starbucks"
+
+    async def test_get_by_id_found(self, client, make_merchant):
+        m = await make_merchant("Amazon")
+        r = await client.get(f"/merchants/{m.id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name"] == "Amazon"
+        assert data["id"] == m.id
+
+    async def test_get_by_id_not_found(self, client):
+        r = await client.get("/merchants/99999")
+        assert r.status_code == 404
+
+    async def test_patch_merchant(self, client, make_merchant):
+        m = await make_merchant("AMZN")
+        r = await client.patch(
+            f"/merchants/{m.id}", json={"name": "Amazon", "location": "Seattle, WA"}
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name"] == "Amazon"
+        assert data["location"] == "Seattle, WA"
+
+    async def test_patch_merchant_not_found(self, client):
+        r = await client.patch("/merchants/99999", json={"name": "X", "location": None})
+        assert r.status_code == 404
+
+    async def test_merge_success(
+        self, client, make_account, make_merchant, make_transaction
+    ):
+        acct = await make_account()
+        m1 = await make_merchant("AMZN")
+        m2 = await make_merchant("AMAZON.COM")
+        await make_transaction(acct.id, merchant_id=m1.id)
+        await make_transaction(acct.id, merchant_id=m2.id)
+        r = await client.post(
+            "/merchants/merge",
+            json={
+                "canonical_name": "Amazon",
+                "canonical_location": None,
+                "merchant_ids": [m1.id, m2.id],
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name"] == "Amazon"
+        assert data["transaction_count"] == 2
+
+    async def test_merge_bad_ids(self, client):
+        r = await client.post(
+            "/merchants/merge",
+            json={
+                "canonical_name": "Amazon",
+                "canonical_location": None,
+                "merchant_ids": [99998, 99999],
+            },
+        )
+        assert r.status_code == 404
+
+    async def test_merge_too_few_ids(self, client, make_merchant):
+        m = await make_merchant("Solo")
+        r = await client.post(
+            "/merchants/merge",
+            json={
+                "canonical_name": "Solo",
+                "canonical_location": None,
+                "merchant_ids": [m.id],
+            },
+        )
+        assert r.status_code == 400
+
+    async def test_list_location_filter(self, client, make_merchant):
+        await make_merchant("Starbucks", "Seattle, WA")
+        await make_merchant("Target", "Austin, TX")
+        r = await client.get("/merchants", params={"location": "seattle"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["name"] == "Starbucks"
+
+
+# ---------------------------------------------------------------------------
+# Categories
+# ---------------------------------------------------------------------------
+
+
+class TestCategories:
+    async def test_list_with_categorized_transactions(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(acct.id, amount=Decimal("-30.00"), subcategory_id=sub.id)
+        await make_transaction(acct.id, amount=Decimal("-20.00"), subcategory_id=sub.id)
+        r = await client.get("/categories")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["category"] == "Food & Drink"
+        assert item["subcategory"] == "Restaurants"
+        assert item["transaction_count"] == 2
+        assert float(item["total_amount"]) == pytest.approx(-50.0)
+
+    async def test_list_empty_when_no_transactions(self, client):
+        r = await client.get("/categories")
+        assert r.status_code == 200
+        assert r.json()["items"] == []
+
+    async def test_list_category_name_filter(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, food_sub = await make_category("Food & Drink", "Restaurants")
+        _, shop_sub = await make_category("Shopping", "Online Shopping")
+        await make_transaction(acct.id, subcategory_id=food_sub.id)
+        await make_transaction(acct.id, subcategory_id=shop_sub.id)
+        r = await client.get("/categories", params={"category": "food"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["category"] == "Food & Drink"
+
+    async def test_list_subcategory_name_filter(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, rest_sub = await make_category("Food & Drink", "Restaurants")
+        _, coffee_sub = await make_category("Food & Coffee", "Coffee & Tea")
+        await make_transaction(acct.id, subcategory_id=rest_sub.id)
+        await make_transaction(acct.id, subcategory_id=coffee_sub.id)
+        r = await client.get("/categories", params={"subcategory": "coffee"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["subcategory"] == "Coffee & Tea"
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+
+class TestAccounts:
+    async def test_list_accounts(self, client, make_account):
+        await make_account("Checking")
+        await make_account("Savings")
+        r = await client.get("/accounts")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) == 2
+        assert data["has_more"] is False
+
+    async def test_list_accounts_pagination(self, client, make_account):
+        for i in range(1, 6):
+            await make_account(f"Account {i:02d}")
+        r = await client.get("/accounts", params={"limit": 3})
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) == 3
+        assert data["has_more"] is True
+        assert data["next_cursor"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
+
+
+class TestImports:
+    async def _make_csv_import(self, db_session, make_account):
+        acct = await make_account("Import Account")
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="test.csv",
+            row_count=10,
+            enriched_rows=5,
+            status="in-progress",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        return ci
+
+    async def test_list_imports(self, client, db_session, make_account):
+        await self._make_csv_import(db_session, make_account)
+        r = await client.get("/imports")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["filename"] == "test.csv"
+
+    async def test_import_progress_found(self, client, db_session, make_account):
+        ci = await self._make_csv_import(db_session, make_account)
+        r = await client.get(f"/imports/{ci.id}/progress")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["csv_import_id"] == ci.id
+        assert data["row_count"] == 10
+        assert data["enriched_rows"] == 5
+        assert data["complete"] is False
+
+    async def test_import_progress_complete_flag(
+        self, client, db_session, make_account
+    ):
+        acct = await make_account("Import Account 2")
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="done.csv",
+            row_count=5,
+            enriched_rows=5,
+            status="complete",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.get(f"/imports/{ci.id}/progress")
+        assert r.status_code == 200
+        assert r.json()["complete"] is True
+
+    async def test_import_progress_not_found(self, client):
+        r = await client.get("/imports/99999/progress")
+        assert r.status_code == 404
+
+    async def test_list_filename_filter(self, client, db_session, make_account):
+        acct = await make_account()
+        ci1 = CsvImport(
+            account_id=acct.id,
+            filename="january.csv",
+            row_count=10,
+            enriched_rows=10,
+            status="complete",
+        )
+        ci2 = CsvImport(
+            account_id=acct.id,
+            filename="february.csv",
+            row_count=5,
+            enriched_rows=5,
+            status="complete",
+        )
+        db_session.add(ci1)
+        db_session.add(ci2)
+        await db_session.commit()
+        r = await client.get("/imports", params={"filename": "jan"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["filename"] == "january.csv"
+
+
+# ---------------------------------------------------------------------------
+# Transactions
+# ---------------------------------------------------------------------------
+
+
+class TestTransactions:
+    async def test_list_empty(self, client):
+        r = await client.get("/transactions")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+        assert data["total_count"] == 0
+
+    async def test_list_with_data(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(acct.id, amount=Decimal("-50.00"), description="Coffee")
+        r = await client.get("/transactions")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["description"] == "Coffee"
+        assert float(item["amount"]) == pytest.approx(-50.0)
+        assert "account" in item
+
+    async def test_list_filter_date_range(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 1, 10))
+        await make_transaction(acct.id, txn_date=date(2024, 3, 10))
+        r = await client.get("/transactions", params={"date_from": "2024-02-01"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+
+    async def test_list_filter_merchant(
+        self, client, make_account, make_merchant, make_transaction
+    ):
+        acct = await make_account()
+        m = await make_merchant("Starbucks")
+        await make_transaction(acct.id, merchant_id=m.id)
+        await make_transaction(acct.id)  # no merchant
+        r = await client.get("/transactions", params={"merchant": "star"})
+        assert r.status_code == 200
+        assert len(r.json()["items"]) == 1
+
+    async def test_list_filter_is_recurring(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(acct.id, is_recurring=True)
+        await make_transaction(acct.id, is_recurring=False)
+        r = await client.get("/transactions", params={"is_recurring": "true"})
+        assert r.status_code == 200
+        assert len(r.json()["items"]) == 1
+
+    async def test_patch_transaction_update_description(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id, description="Old Description")
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "New Description",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["description"] == "New Description"
+
+    async def test_patch_transaction_set_merchant_and_category(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id)
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Coffee",
+                "merchant_name": "Starbucks",
+                "category": "Food & Drink",
+                "subcategory": "Coffee & Tea",
+                "notes": None,
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["merchant"] == "Starbucks"
+        assert data["category"] == "Food & Drink"
+        assert data["subcategory"] == "Coffee & Tea"
+
+    async def test_patch_transaction_clear_merchant(
+        self, client, make_account, make_merchant, make_transaction
+    ):
+        acct = await make_account()
+        m = await make_merchant("Starbucks")
+        tx = await make_transaction(acct.id, merchant_id=m.id)
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Coffee",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["merchant"] is None
+
+    async def test_patch_transaction_not_found(self, client):
+        r = await client.patch(
+            "/transactions/99999",
+            json={
+                "description": "X",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+            },
+        )
+        assert r.status_code == 404
+
+    async def test_list_filter_description(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(acct.id, description="Morning Coffee")
+        await make_transaction(acct.id, description="Grocery Run")
+        r = await client.get("/transactions", params={"description": "coffee"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert "Coffee" in items[0]["description"]
+
+    async def test_list_filter_amount_range(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(acct.id, amount=Decimal("-5.00"))
+        await make_transaction(acct.id, amount=Decimal("-50.00"))
+        await make_transaction(acct.id, amount=Decimal("-200.00"))
+        r = await client.get(
+            "/transactions", params={"amount_min": "-100", "amount_max": "-10"}
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert float(items[0]["amount"]) == pytest.approx(-50.0)
+
+    async def test_list_filter_category(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, food_sub = await make_category("Food & Drink", "Restaurants")
+        _, shop_sub = await make_category("Shopping", "Online Shopping")
+        await make_transaction(acct.id, subcategory_id=food_sub.id)
+        await make_transaction(acct.id, subcategory_id=shop_sub.id)
+        r = await client.get("/transactions", params={"category": "food"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["category"] == "Food & Drink"
+
+    async def test_list_filter_account(self, client, make_account, make_transaction):
+        checking = await make_account("Checking")
+        savings = await make_account("Savings")
+        await make_transaction(checking.id)
+        await make_transaction(savings.id)
+        r = await client.get("/transactions", params={"account": "check"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["account"] == "Checking"
+
+    async def test_list_filter_uncategorized(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(acct.id, subcategory_id=sub.id)
+        await make_transaction(acct.id)  # no category
+        r = await client.get("/transactions", params={"uncategorized": "true"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["category"] is None
+
+    async def test_list_filter_import_id(
+        self, client, db_session, make_account, make_transaction
+    ):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="import.csv",
+            row_count=1,
+            enriched_rows=0,
+            status="in-progress",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        await make_transaction(acct.id, csv_import_id=ci.id)
+        await make_transaction(acct.id)
+        r = await client.get("/transactions", params={"import_id": ci.id})
+        assert r.status_code == 200
+        assert len(r.json()["items"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+
+
+class TestAnalytics:
+    async def test_monthly_list(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 1, 15))
+        await make_transaction(acct.id, txn_date=date(2024, 3, 10))
+        r = await client.get("/monthly")
+        assert r.status_code == 200
+        months = r.json()["months"]
+        assert "2024-01" in months
+        assert "2024-03" in months
+
+    async def test_monthly_report(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("1000.00"), txn_date=date(2024, 1, 5)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-200.00"), txn_date=date(2024, 1, 10)
+        )
+        r = await client.get("/monthly/2024-01")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["month"] == "2024-01"
+        summary = data["summary"]
+        assert float(summary["income"]) == pytest.approx(1000.0)
+        assert float(summary["expenses"]) == pytest.approx(-200.0)
+        assert "category_breakdown" in data
+
+    async def test_overview(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("2000.00"), txn_date=date(2024, 1, 1)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-500.00"), txn_date=date(2024, 1, 2)
+        )
+        r = await client.get("/overview")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["transaction_count"] == 2
+        assert float(data["income"]) == pytest.approx(2000.0)
+        assert float(data["expenses"]) == pytest.approx(-500.0)
+        assert "sankey" in data
+        assert "expense_breakdown" in data
+
+    async def test_recurring(
+        self, client, make_account, make_merchant, make_transaction
+    ):
+        acct = await make_account()
+        m = await make_merchant("Netflix")
+        # Create monthly-spaced recurring transactions
+        for month in [1, 2, 3]:
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-15.99"),
+                description="Netflix Subscription",
+                txn_date=date(2024, month, 1),
+                merchant_id=m.id,
+                is_recurring=True,
+            )
+        r = await client.get("/recurring")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["frequency"] == "monthly"
+        assert item["occurrences"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Import CSV endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestImportCsv:
+    def _csv_file(self, content: str, filename: str = "test.csv"):
+        return ("file", (filename, io.BytesIO(content.encode()), "text/csv"))
+
+    async def test_import_csv_success(self, client, mocker):
+        mocker.patch(
+            "budget.main.detector.detect",
+            return_value={"date": 0, "amount": 1, "description": 2},
+        )
+        mocker.patch("budget.main._run_enrichment", new=AsyncMock())
+
+        csv_content = "Date,Amount,Description\n2024-01-15,-10.00,Coffee\n2024-01-16,-20.00,Lunch\n"
+        r = await client.post(
+            "/import-csv",
+            files=[self._csv_file(csv_content)],
+            data={"account_name": "Checking"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["rows_imported"] == 2
+        assert data["status"] == "processing"
+        assert data["filename"] == "test.csv"
+
+    async def test_import_csv_non_csv_rejected(self, client):
+        r = await client.post(
+            "/import-csv",
+            files=[("file", ("data.txt", io.BytesIO(b"hello"), "text/plain"))],
+            data={"account_name": "Checking"},
+        )
+        assert r.status_code == 400
+
+    async def test_import_csv_missing_columns_rejected(self, client, mocker):
+        mocker.patch(
+            "budget.main.detector.detect",
+            return_value={"date": None, "amount": None, "description": 0},
+        )
+        csv_content = "Description,Memo\nCoffee,Note\n"
+        r = await client.post(
+            "/import-csv",
+            files=[self._csv_file(csv_content)],
+            data={"account_name": "Checking"},
+        )
+        assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# AI endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAiParseQuery:
+    async def test_parse_query(self, client, mocker):
+        mocker.patch(
+            "budget.main.query_parser.parse",
+            return_value={
+                "date_from": "2024-01-01",
+                "date_to": "2024-01-31",
+                "merchant": None,
+                "explanation": "Transactions in January 2024",
+            },
+        )
+        r = await client.post(
+            "/ai/parse-query", json={"query": "transactions in January"}
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["explanation"] == "Transactions in January 2024"
+        assert data["filters"]["date_from"] == "2024-01-01"
+
+
+class TestAiFindDuplicateMerchants:
+    async def test_find_duplicates(
+        self, client, make_account, make_merchant, make_transaction, mocker
+    ):
+        acct = await make_account()
+        m1 = await make_merchant("AMZN")
+        m2 = await make_merchant("AMAZON.COM")
+        await make_transaction(acct.id, merchant_id=m1.id)
+        await make_transaction(acct.id, merchant_id=m2.id)
+
+        mocker.patch(
+            "budget.main.merchant_duplicate_finder.find",
+            return_value={
+                "groups": [
+                    {
+                        "canonical_name": "Amazon",
+                        "canonical_location": None,
+                        "member_ids": [m1.id, m2.id],
+                    }
+                ]
+            },
+        )
+        r = await client.post("/ai/find-duplicate-merchants")
+        assert r.status_code == 200
+        data = r.json()
+        groups = data["groups"]
+        assert len(groups) == 1
+        assert groups[0]["canonical_name"] == "Amazon"
+        assert len(groups[0]["members"]) == 2
+
+    async def test_find_duplicates_empty_merchants(self, client):
+        r = await client.post("/ai/find-duplicate-merchants")
+        assert r.status_code == 200
+        assert r.json() == {"groups": []}
+
+
+# ---------------------------------------------------------------------------
+# parse_date / parse_amount helpers
+# ---------------------------------------------------------------------------
+
+
+class TestParseDateAmount:
+    def test_parse_date_iso(self):
+        assert parse_date("2024-01-15") == date(2024, 1, 15)
+
+    def test_parse_date_us_slash(self):
+        assert parse_date("01/15/2024") == date(2024, 1, 15)
+
+    def test_parse_date_intl_slash(self):
+        # %m/%d/%Y fails for month=15, falls through to %d/%m/%Y
+        assert parse_date("15/01/2024") == date(2024, 1, 15)
+
+    def test_parse_date_long_month(self):
+        assert parse_date("January 15, 2024") == date(2024, 1, 15)
+
+    def test_parse_date_strips_whitespace(self):
+        assert parse_date("  2024-03-20  ") == date(2024, 3, 20)
+
+    def test_parse_date_invalid_raises(self):
+        with pytest.raises(ValueError, match="Unrecognised date format"):
+            parse_date("not-a-date")
+
+    def test_parse_amount_negative(self):
+        assert parse_amount("-10.50") == Decimal("-10.50")
+
+    def test_parse_amount_positive(self):
+        assert parse_amount("500.00") == Decimal("500.00")
+
+    def test_parse_amount_dollar_sign(self):
+        assert parse_amount("$99.99") == Decimal("99.99")
+
+    def test_parse_amount_parentheses(self):
+        assert parse_amount("(25.00)") == Decimal("-25.00")
+
+    def test_parse_amount_comma_thousands(self):
+        assert parse_amount("1,234.56") == Decimal("1234.56")
+
+    def test_parse_amount_strips_whitespace(self):
+        assert parse_amount("  -5.00  ") == Decimal("-5.00")
+
+    def test_parse_amount_dollar_with_parens(self):
+        assert parse_amount("$(50.00)") == Decimal("-50.00")
+
+
+# ---------------------------------------------------------------------------
+# _classify_gap helper
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyGap:
+    def test_weekly(self):
+        assert _classify_gap(7) == "weekly"
+
+    def test_weekly_boundary_low(self):
+        assert _classify_gap(5) == "weekly"
+
+    def test_weekly_boundary_high(self):
+        assert _classify_gap(10) == "weekly"
+
+    def test_biweekly(self):
+        assert _classify_gap(14) == "biweekly"
+
+    def test_monthly(self):
+        assert _classify_gap(30) == "monthly"
+
+    def test_quarterly(self):
+        assert _classify_gap(90) == "quarterly"
+
+    def test_annual(self):
+        assert _classify_gap(365) == "annual"
+
+    def test_below_all_ranges_returns_none(self):
+        assert _classify_gap(1) is None
+
+    def test_between_ranges_returns_none(self):
+        # 200 falls between quarterly (60–120) and annual (300–400)
+        assert _classify_gap(200) is None
