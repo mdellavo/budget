@@ -6,6 +6,7 @@ import {
   listCategories,
   parseQuery,
   updateTransaction,
+  reEnrichTransactions,
 } from "../api/client";
 import type { TransactionFilters, TransactionUpdateBody } from "../api/client";
 import type { CategoryItem, TransactionItem } from "../types";
@@ -123,6 +124,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
     notes: tx.notes ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const [reEnriching, setReEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [merchantSuggestions, setMerchantSuggestions] = useState<string[]>([]);
@@ -181,6 +183,29 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
       setForm((prev) => ({ ...prev, category: value, subcategory: "" }));
     } else {
       setForm((prev) => ({ ...prev, [key]: value }));
+    }
+  }
+
+  async function handleReEnrich() {
+    setReEnriching(true);
+    setError(null);
+    try {
+      const res = await reEnrichTransactions([tx.id]);
+      if (res.items[0]) {
+        const updated = res.items[0];
+        setForm({
+          description: updated.description,
+          merchant: updated.merchant ?? "",
+          category: updated.category ?? "",
+          subcategory: updated.subcategory ?? "",
+          notes: updated.notes ?? "",
+        });
+        onSaved(updated);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-enrich failed");
+    } finally {
+      setReEnriching(false);
     }
   }
 
@@ -271,7 +296,19 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         {/* Form */}
         <div className="px-5 py-4 space-y-3">
           <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
-            <label className="text-sm text-gray-700 font-medium text-right">Description</label>
+            <div className="flex justify-between items-center">
+              <label className="text-sm text-gray-700 font-medium">Description</label>
+              {tx.raw_description && (
+                <button
+                  type="button"
+                  onClick={handleReEnrich}
+                  disabled={reEnriching || saving}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {reEnriching ? "Re-enriching…" : "Re-enrich"}
+                </button>
+              )}
+            </div>
             <input
               type="text"
               value={form.description}
@@ -488,9 +525,23 @@ interface BulkEditBarProps {
   onClear: () => void;
   saving: boolean;
   error: string | null;
+  eligibleForReEnrich: number;
+  onReEnrich: () => void;
+  reEnriching: boolean;
+  reEnrichError: string | null;
 }
 
-function BulkEditBar({ count, onApply, onClear, saving, error }: BulkEditBarProps) {
+function BulkEditBar({
+  count,
+  onApply,
+  onClear,
+  saving,
+  error,
+  eligibleForReEnrich,
+  onReEnrich,
+  reEnriching,
+  reEnrichError,
+}: BulkEditBarProps) {
   const [form, setForm] = useState({ merchant: "", category: "", subcategory: "" });
   const [merchantSuggestions, setMerchantSuggestions] = useState<string[]>([]);
   const [allCategoryRows, setAllCategoryRows] = useState<CategoryItem[]>([]);
@@ -554,56 +605,71 @@ function BulkEditBar({ count, onApply, onClear, saving, error }: BulkEditBarProp
     "border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500";
 
   return (
-    <div className="sticky top-0 z-10 mb-3 bg-indigo-50 border border-indigo-200 rounded-md px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
-      <span className="text-sm font-medium text-indigo-700 shrink-0">{count} selected</span>
-      <div className="flex items-center gap-1.5">
-        <label className="text-xs text-gray-500 font-medium">Merchant</label>
-        <ComboBox
-          value={form.merchant}
-          onChange={(v) => setField("merchant", v)}
-          suggestions={merchantSuggestions}
-          placeholder="(no change)"
-          className={inputClass}
-        />
+    <div className="sticky top-0 z-10 mb-3 bg-indigo-50 border border-indigo-200 rounded-md shadow-sm">
+      {eligibleForReEnrich > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-indigo-200">
+          <button
+            type="button"
+            onClick={onReEnrich}
+            disabled={reEnriching || saving}
+            className="text-sm text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+          >
+            {reEnriching ? "Re-enriching…" : `Re-enrich (${eligibleForReEnrich} eligible)`}
+          </button>
+          {reEnrichError && <span className="text-sm text-red-600">{reEnrichError}</span>}
+        </div>
+      )}
+      <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium text-indigo-700 shrink-0">{count} selected</span>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500 font-medium">Merchant</label>
+          <ComboBox
+            value={form.merchant}
+            onChange={(v) => setField("merchant", v)}
+            suggestions={merchantSuggestions}
+            placeholder="(no change)"
+            className={inputClass}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500 font-medium">Category</label>
+          <ComboBox
+            value={form.category}
+            onChange={(v) => setField("category", v)}
+            suggestions={categorySuggestions}
+            placeholder="(no change)"
+            className={inputClass}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500 font-medium">Subcategory</label>
+          <ComboBox
+            value={form.subcategory}
+            onChange={(v) => setField("subcategory", v)}
+            suggestions={subcategorySuggestions}
+            placeholder="(no change)"
+            className={inputClass}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => onApply(form)}
+          disabled={allEmpty || saving}
+          className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          {saving ? "Applying…" : "Apply"}
+        </button>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-gray-400 hover:text-gray-700 focus:outline-none text-lg leading-none"
+          aria-label="Clear selection"
+          title="Clear selection"
+        >
+          ✕
+        </button>
+        {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
-      <div className="flex items-center gap-1.5">
-        <label className="text-xs text-gray-500 font-medium">Category</label>
-        <ComboBox
-          value={form.category}
-          onChange={(v) => setField("category", v)}
-          suggestions={categorySuggestions}
-          placeholder="(no change)"
-          className={inputClass}
-        />
-      </div>
-      <div className="flex items-center gap-1.5">
-        <label className="text-xs text-gray-500 font-medium">Subcategory</label>
-        <ComboBox
-          value={form.subcategory}
-          onChange={(v) => setField("subcategory", v)}
-          suggestions={subcategorySuggestions}
-          placeholder="(no change)"
-          className={inputClass}
-        />
-      </div>
-      <button
-        type="button"
-        onClick={() => onApply(form)}
-        disabled={allEmpty || saving}
-        className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-      >
-        {saving ? "Applying…" : "Apply"}
-      </button>
-      <button
-        type="button"
-        onClick={onClear}
-        className="text-gray-400 hover:text-gray-700 focus:outline-none text-lg leading-none"
-        aria-label="Clear selection"
-        title="Clear selection"
-      >
-        ✕
-      </button>
-      {error && <span className="text-sm text-red-600">{error}</span>}
     </div>
   );
 }
@@ -676,6 +742,8 @@ export default function TransactionsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkReEnriching, setBulkReEnriching] = useState(false);
+  const [bulkReEnrichError, setBulkReEnrichError] = useState<string | null>(null);
 
   const fetchFirstPage = useCallback(
     async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
@@ -791,6 +859,31 @@ export default function TransactionsPage() {
   }
 
   const allRows = pages.flat();
+
+  const eligibleForReEnrich = [...selectedIds].filter(
+    (id) => allRows.find((r) => r.id === id)?.raw_description
+  ).length;
+
+  async function handleBulkReEnrich() {
+    setBulkReEnriching(true);
+    setBulkReEnrichError(null);
+    try {
+      const res = await reEnrichTransactions([...selectedIds]);
+      setPages((prev) =>
+        prev.map((page) =>
+          page.map((r) => {
+            const updated = res.items.find((u) => u.id === r.id);
+            return updated ?? r;
+          })
+        )
+      );
+      setSelectedIds(new Set());
+    } catch (e) {
+      setBulkReEnrichError(e instanceof Error ? e.message : "Re-enrich failed");
+    } finally {
+      setBulkReEnriching(false);
+    }
+  }
 
   const selectAllRef = useRef<HTMLInputElement>(null);
   const allSelected = allRows.length > 0 && allRows.every((r) => selectedIds.has(r.id));
@@ -1051,6 +1144,10 @@ export default function TransactionsPage() {
           onClear={() => setSelectedIds(new Set())}
           saving={bulkSaving}
           error={bulkError}
+          eligibleForReEnrich={eligibleForReEnrich}
+          onReEnrich={handleBulkReEnrich}
+          reEnriching={bulkReEnriching}
+          reEnrichError={bulkReEnrichError}
         />
       )}
 

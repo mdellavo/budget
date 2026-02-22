@@ -270,6 +270,20 @@ export async function mergeMerchants(body: MerchantMergeBody): Promise<MergedMer
   );
 }
 
+export interface ReEnrichResponse {
+  items: TransactionItem[];
+}
+
+export async function reEnrichTransactions(ids: number[]): Promise<ReEnrichResponse> {
+  return handleResponse<ReEnrichResponse>(
+    await fetch(`${BASE}/transactions/re-enrich`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transaction_ids: ids }),
+    })
+  );
+}
+
 export async function importCsv(
   file: File,
   accountName: string,

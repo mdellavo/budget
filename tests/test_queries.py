@@ -269,7 +269,7 @@ class TestMerchantQueries:
         await make_merchant("Target", "Austin, TX")
         await make_merchant("Amazon")  # no location
         mq = MerchantQueries(db_session)
-        items, _, _ = await mq.list(
+        items, _, _ = await mq.paginate(
             name=None,
             location="seattle",
             sort_by="name",
@@ -573,6 +573,41 @@ class TestTransactionQueries:
         await db_session.commit()
         sub2 = await txq.find_or_create_subcategory(cat.id, "Online Shopping")
         assert sub.id == sub2.id
+
+    async def test_get_by_ids_returns_transactions(
+        self, db_session, make_account, make_merchant, make_category, make_transaction
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Starbucks")
+        cat, sub = await make_category("Food & Drink", "Coffee & Tea")
+        tx1 = await make_transaction(
+            acct.id, merchant_id=merchant.id, subcategory_id=sub.id
+        )
+        tx2 = await make_transaction(acct.id)
+        txq = TransactionQueries(db_session)
+        results = await txq.get_by_ids([tx1.id, tx2.id])
+        assert len(results) == 2
+        assert {r.id for r in results} == {tx1.id, tx2.id}
+        # Relations eagerly loaded
+        enriched = next(r for r in results if r.id == tx1.id)
+        assert enriched.merchant.name == "Starbucks"
+        assert enriched.subcategory.name == "Coffee & Tea"
+        assert enriched.account.name == "Checking"
+
+    async def test_get_by_ids_empty_list(self, db_session):
+        txq = TransactionQueries(db_session)
+        results = await txq.get_by_ids([])
+        assert results == []
+
+    async def test_get_by_ids_ignores_missing(
+        self, db_session, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id)
+        txq = TransactionQueries(db_session)
+        results = await txq.get_by_ids([tx.id, 99999])
+        assert len(results) == 1
+        assert results[0].id == tx.id
 
 
 # ---------------------------------------------------------------------------

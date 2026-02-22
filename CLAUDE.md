@@ -143,3 +143,4 @@ Pages in `frontend/src/pages/`. API calls via typed client in `frontend/src/api/
 
 - SQLite is used; no migrations — schema changes are applied via `ALTER TABLE` in the FastAPI lifespan handler (`main.py`)
 - `MerchantQueries.list` was renamed to `MerchantQueries.paginate` to avoid a mypy issue where a method named `list` shadows the `list` builtin in sibling method annotations within the same class
+- `query.py` uses `from __future__ import annotations`. Any method inside a class that has a `list` method (e.g. `TransactionQueries`) must **not** use `list[T]` in annotations — use `Sequence[T]` from `collections.abc` instead, since `list[T]` resolves to the class method rather than the builtin under postponed evaluation

@@ -525,6 +525,80 @@ class TestTransactions:
         assert r.status_code == 200
         assert len(r.json()["items"]) == 1
 
+    async def test_re_enrich_empty_ids(self, client):
+        r = await client.post("/transactions/re-enrich", json={"transaction_ids": []})
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+    async def test_re_enrich_skips_no_raw_description(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id, description="Coffee")  # no raw_description
+        r = await client.post(
+            "/transactions/re-enrich", json={"transaction_ids": [tx.id]}
+        )
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+    async def test_re_enrich_success(
+        self, client, db_session, make_account, make_transaction, mocker
+    ):
+        acct = await make_account()
+        tx = await make_transaction(
+            acct.id,
+            description="STARBUCKS #4821",
+            raw_description="STARBUCKS #4821 SEATTLE WA",
+        )
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[
+                {
+                    "index": 0,
+                    "description": "Starbucks Coffee",
+                    "merchant_name": "Starbucks",
+                    "merchant_location": "Seattle, WA",
+                    "category": "Food & Drink",
+                    "subcategory": "Coffee & Tea",
+                    "is_recurring": True,
+                }
+            ],
+        )
+        r = await client.post(
+            "/transactions/re-enrich", json={"transaction_ids": [tx.id]}
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["id"] == tx.id
+        # Scalar fields are correct in the response
+        assert item["description"] == "Starbucks Coffee"
+        assert item["is_recurring"] is True
+        # Verify merchant/category were persisted to DB (refresh bypasses identity map)
+        await db_session.refresh(tx)
+        assert tx.description == "Starbucks Coffee"
+        assert tx.is_recurring is True
+        assert tx.merchant_id is not None
+        assert tx.subcategory_id is not None
+
+    async def test_re_enrich_ai_error_returns_502(
+        self, client, make_account, make_transaction, mocker
+    ):
+        acct = await make_account()
+        tx = await make_transaction(
+            acct.id, raw_description="STARBUCKS #4821 SEATTLE WA"
+        )
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            side_effect=RuntimeError("API timeout"),
+        )
+        r = await client.post(
+            "/transactions/re-enrich", json={"transaction_ids": [tx.id]}
+        )
+        assert r.status_code == 502
+        assert "AI enrichment failed" in r.json()["detail"]
+
 
 # ---------------------------------------------------------------------------
 # Analytics

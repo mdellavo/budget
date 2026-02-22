@@ -302,4 +302,118 @@ describe("TransactionsPage", () => {
     await screen.findByRole("dialog");
     expect(screen.queryByText("Raw description")).not.toBeInTheDocument();
   });
+
+  it("shows Re-enrich button in edit modal when tx has raw_description", async () => {
+    const user = userEvent.setup();
+    const txWithRaw = { ...TX_1, raw_description: "STARBUCKS #4821 SEATTLE WA" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithRaw],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    await user.click(screen.getByRole("button", { name: /edit transaction/i }));
+    await screen.findByRole("dialog");
+    expect(screen.getByRole("button", { name: /^re-enrich$/i })).toBeInTheDocument();
+  });
+
+  it("hides Re-enrich button in edit modal when raw_description is null", async () => {
+    const user = userEvent.setup();
+    // TX_1 has raw_description: null
+    server.use(http.get("/api/transactions", () => HttpResponse.json(TRANSACTIONS_RESPONSE)));
+    renderPage();
+    await screen.findByText("Coffee shop");
+    await user.click(screen.getByRole("button", { name: /edit transaction/i }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("button", { name: /^re-enrich$/i })).not.toBeInTheDocument();
+  });
+
+  it("Re-enrich in edit modal calls API, updates the row, and closes the modal", async () => {
+    const user = userEvent.setup();
+    const txWithRaw = {
+      ...TX_1,
+      description: "STARBUCKS #4821",
+      raw_description: "STARBUCKS #4821 SEATTLE WA",
+    };
+    const enrichedTx = {
+      ...txWithRaw,
+      description: "Starbucks Coffee",
+      merchant: "Starbucks",
+      category: "Food & Drink",
+      subcategory: "Coffee & Tea",
+    };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithRaw],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      ),
+      http.post("/api/transactions/re-enrich", () => HttpResponse.json({ items: [enrichedTx] }))
+    );
+    renderPage();
+    await screen.findByText("STARBUCKS #4821");
+    await user.click(screen.getByRole("button", { name: /edit transaction/i }));
+    await screen.findByRole("dialog");
+    await user.click(screen.getByRole("button", { name: /^re-enrich$/i }));
+    // Modal closes and the row in the list is updated
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("Starbucks Coffee")).toBeInTheDocument();
+  });
+
+  it("shows Re-enrich count in BulkEditBar when eligible transactions are selected", async () => {
+    const user = userEvent.setup();
+    const txWithRaw = { ...TX_1, raw_description: "STARBUCKS #4821 SEATTLE WA" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithRaw],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[1]); // row checkbox
+    await screen.findByText("1 selected");
+    expect(screen.getByRole("button", { name: /re-enrich \(1 eligible\)/i })).toBeInTheDocument();
+  });
+
+  it("bulk Re-enrich calls API, updates rows in place, and clears selection", async () => {
+    const user = userEvent.setup();
+    const txWithRaw = { ...TX_1, raw_description: "STARBUCKS #4821 SEATTLE WA" };
+    const enrichedTx = { ...txWithRaw, description: "Starbucks Coffee", merchant: "Starbucks" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithRaw],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      ),
+      http.post("/api/transactions/re-enrich", () => HttpResponse.json({ items: [enrichedTx] }))
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[1]);
+    await screen.findByText("1 selected");
+    await user.click(screen.getByRole("button", { name: /re-enrich \(1 eligible\)/i }));
+    await screen.findByText("Starbucks Coffee");
+    await waitFor(() => {
+      expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+    });
+  });
 });

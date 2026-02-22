@@ -891,6 +891,97 @@ async def update_transaction(
         "subcategory": tx.subcategory.name if tx.subcategory else None,
         "notes": tx.notes,
         "is_recurring": tx.is_recurring,
+        "raw_description": tx.raw_description,
+    }
+
+
+class ReEnrichRequest(BaseModel):
+    transaction_ids: list[int]
+
+
+@app.post("/transactions/re-enrich")
+async def re_enrich_transactions(
+    body: ReEnrichRequest, db: AsyncSession = Depends(get_db)
+):
+    if not body.transaction_ids:
+        return {"items": []}
+
+    txq = TransactionQueries(db)
+    transactions = await txq.get_by_ids(body.transaction_ids)
+    eligible = [tx for tx in transactions if tx.raw_description]
+
+    if not eligible:
+        return {"items": []}
+
+    enrich_input = [
+        {
+            "index": i,
+            "description": tx.raw_description,
+            "amount": str(tx.amount),
+            "date": str(tx.date),
+        }
+        for i, tx in enumerate(eligible)
+    ]
+
+    try:
+        results = await asyncio.to_thread(enricher._enrich_batch, enrich_input, 0)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI enrichment failed: {e}")
+
+    mq = MerchantQueries(db)
+    cq = CategoryQueries(db)
+    merchant_cache: dict[str, tuple[int, bool]] = {}
+    category_cache: dict[str, int] = {}
+    subcategory_cache: dict[tuple, int] = {}
+
+    for r in results:
+        tx = eligible[r["index"]]
+
+        mname = r.get("merchant_name")
+        mlocation = r.get("merchant_location")
+        if mname:
+            tx.merchant_id = await mq.find_or_create_for_enrichment(
+                mname, mlocation, merchant_cache
+            )
+        else:
+            tx.merchant_id = None
+
+        cname = r.get("category")
+        scname = r.get("subcategory")
+        if cname and scname:
+            cid = await cq.find_or_create_for_enrichment(cname, category_cache)
+            tx.subcategory_id = await cq.find_or_create_subcategory_for_enrichment(
+                cid, scname, subcategory_cache
+            )
+        else:
+            tx.subcategory_id = None
+
+        if r.get("description"):
+            tx.description = r["description"]
+        tx.is_recurring = bool(r.get("is_recurring", False))
+
+    await db.commit()
+
+    updated = await txq.get_by_ids([tx.id for tx in eligible])
+
+    return {
+        "items": [
+            {
+                "id": tx.id,
+                "date": tx.date.isoformat(),
+                "description": tx.description,
+                "amount": str(tx.amount),
+                "account_id": tx.account_id,
+                "account": tx.account.name,
+                "merchant": tx.merchant.name if tx.merchant else None,
+                "category": tx.subcategory.category.name if tx.subcategory else None,
+                "subcategory": tx.subcategory.name if tx.subcategory else None,
+                "notes": tx.notes,
+                "is_recurring": tx.is_recurring,
+                "raw_description": tx.raw_description,
+            }
+            for tx in updated
+        ]
     }
 
 

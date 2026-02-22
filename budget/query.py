@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
@@ -885,6 +888,20 @@ class TransactionQueries:
                 )
             )
         ).scalar_one_or_none()
+
+    async def get_by_ids(self, ids: Sequence[int]) -> Sequence[Transaction]:
+        result = await self.db.execute(
+            select(Transaction)
+            .where(Transaction.id.in_(ids))
+            .options(
+                selectinload(Transaction.account),
+                selectinload(Transaction.merchant),
+                selectinload(Transaction.subcategory).selectinload(
+                    Subcategory.category
+                ),
+            )
+        )
+        return list(result.scalars().all())
 
     async def find_or_create_merchant(self, name: str) -> Merchant:
         merchant = (
