@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             pass  # column already exists
+        try:
+            await conn.execute(
+                text("ALTER TABLE transactions ADD COLUMN raw_description TEXT")
+            )
+        except Exception:
+            pass  # column already exists
     yield
 
 
@@ -215,9 +221,8 @@ async def _run_enrichment(
                         category_id, scname, subcategory_cache
                     )
 
-                description = r.get("description") or (
-                    row[desc_col].strip() if desc_col else ""
-                )
+                raw_description = row[desc_col].strip() if desc_col else None
+                description = r.get("description") or raw_description or ""
                 is_recurring = bool(r.get("is_recurring", False))
                 db.add(
                     Transaction(
@@ -225,6 +230,7 @@ async def _run_enrichment(
                         csv_import_id=csv_import_id,
                         date=date_val,
                         description=description,
+                        raw_description=raw_description,
                         amount=amount_val,
                         merchant_id=merchant_id,
                         subcategory_id=subcategory_id,
@@ -808,6 +814,7 @@ async def list_transactions(
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
+                "raw_description": tx.raw_description,
             }
             for tx in items
         ],

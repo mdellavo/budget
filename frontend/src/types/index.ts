@@ -31,6 +31,7 @@ export interface TransactionItem {
   subcategory: string | null;
   notes: string | null;
   is_recurring: boolean;
+  raw_description: string | null;
 }
 
 export interface TransactionsResponse {

@@ -109,6 +109,7 @@ class Transaction(Base):
     csv_import_id: Mapped[int | None] = mapped_column(ForeignKey("csv_imports.id"))
     date: Mapped[date] = mapped_column(Date)
     description: Mapped[str] = mapped_column(String(500))
+    raw_description: Mapped[str | None] = mapped_column(String(500))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id"))
     subcategory_id: Mapped[int | None] = mapped_column(ForeignKey("subcategories.id"))

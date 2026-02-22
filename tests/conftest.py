@@ -96,6 +96,7 @@ async def make_transaction(db_session):
         subcategory_id=None,
         is_recurring=False,
         csv_import_id=None,
+        raw_description=None,
     ):
         if txn_date is None:
             txn_date = date(2024, 1, 15)
@@ -103,6 +104,7 @@ async def make_transaction(db_session):
             account_id=account_id,
             date=txn_date,
             description=description,
+            raw_description=raw_description,
             amount=amount,
             merchant_id=merchant_id,
             subcategory_id=subcategory_id,

@@ -26,6 +26,7 @@ const TX_1: Record<string, unknown> = {
   subcategory: "Restaurants",
   notes: null,
   is_recurring: false,
+  raw_description: null,
 };
 
 const TX_2: Record<string, unknown> = {
@@ -40,6 +41,7 @@ const TX_2: Record<string, unknown> = {
   subcategory: null,
   notes: null,
   is_recurring: false,
+  raw_description: null,
 };
 
 const TRANSACTIONS_RESPONSE = {
@@ -243,5 +245,61 @@ describe("TransactionsPage", () => {
     renderPage();
     await screen.findByText("Coffee shop");
     expect(screen.getByText("recurring")).toBeInTheDocument();
+  });
+
+  it("shows Raw description in detail modal when raw_description differs from description", async () => {
+    const user = userEvent.setup();
+    const txWithRaw = {
+      ...TX_1,
+      description: "Starbucks Coffee",
+      raw_description: "STARBUCKS #4821 SEATTLE WA",
+    };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithRaw],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Starbucks Coffee");
+    await user.click(screen.getByText("Starbucks Coffee"));
+    await screen.findByRole("dialog");
+    expect(screen.getByText("Raw description")).toBeInTheDocument();
+    expect(screen.getByText("STARBUCKS #4821 SEATTLE WA")).toBeInTheDocument();
+  });
+
+  it("hides Raw description in detail modal when raw_description is null", async () => {
+    const user = userEvent.setup();
+    // TX_1 has raw_description: null
+    server.use(http.get("/api/transactions", () => HttpResponse.json(TRANSACTIONS_RESPONSE)));
+    renderPage();
+    await screen.findByText("Coffee shop");
+    await user.click(screen.getByText("Coffee shop"));
+    await screen.findByRole("dialog");
+    expect(screen.queryByText("Raw description")).not.toBeInTheDocument();
+  });
+
+  it("hides Raw description in detail modal when raw_description matches description", async () => {
+    const user = userEvent.setup();
+    const txSame = { ...TX_1, raw_description: "Coffee shop" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txSame],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    await user.click(screen.getByText("Coffee shop"));
+    await screen.findByRole("dialog");
+    expect(screen.queryByText("Raw description")).not.toBeInTheDocument();
   });
 });

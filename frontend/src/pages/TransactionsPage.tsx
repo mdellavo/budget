@@ -415,6 +415,11 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
         <dl className="px-5 py-1">
           <Row label="Date">{tx.date}</Row>
           <Row label="Description">{tx.description}</Row>
+          {tx.raw_description && tx.raw_description !== tx.description && (
+            <Row label="Raw description">
+              <span className="font-mono text-xs text-gray-500">{tx.raw_description}</span>
+            </Row>
+          )}
           <Row label="Amount">
             <span
               className={`font-mono font-medium ${positive ? "text-green-600" : "text-red-600"}`}

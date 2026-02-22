@@ -10,9 +10,13 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
-from budget.main import _classify_gap, parse_amount, parse_date
-from budget.models import CsvImport
+from budget.database import Base
+from budget.main import _classify_gap, _run_enrichment, parse_amount, parse_date
+from budget.models import Account, CsvImport, Transaction
 
 # ---------------------------------------------------------------------------
 # Merchants
@@ -319,6 +323,22 @@ class TestTransactions:
         assert item["description"] == "Coffee"
         assert float(item["amount"]) == pytest.approx(-50.0)
         assert "account" in item
+        assert item["raw_description"] is None
+
+    async def test_list_raw_description_populated(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id,
+            description="Starbucks Coffee",
+            raw_description="STARBUCKS #4821 SEATTLE WA",
+        )
+        r = await client.get("/transactions")
+        assert r.status_code == 200
+        item = r.json()["items"][0]
+        assert item["description"] == "Starbucks Coffee"
+        assert item["raw_description"] == "STARBUCKS #4821 SEATTLE WA"
 
     async def test_list_filter_date_range(self, client, make_account, make_transaction):
         acct = await make_account()
@@ -689,6 +709,158 @@ class TestAiFindDuplicateMerchants:
         r = await client.post("/ai/find-duplicate-merchants")
         assert r.status_code == 200
         assert r.json() == {"groups": []}
+
+
+# ---------------------------------------------------------------------------
+# _run_enrichment — raw_description storage
+# ---------------------------------------------------------------------------
+
+
+class TestRunEnrichment:
+    """Integration tests for _run_enrichment that verify raw_description is persisted."""
+
+    async def _setup_db(self):
+        """Create an isolated in-memory engine with StaticPool so all sessions share data."""
+        eng = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        return eng
+
+    async def test_stores_raw_description_from_csv(self, mocker):
+        eng = await self._setup_db()
+        factory = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[
+                {
+                    "index": 0,
+                    "description": "Starbucks Coffee",
+                    "merchant_name": None,
+                    "merchant_location": None,
+                    "category": None,
+                    "subcategory": None,
+                    "is_recurring": False,
+                }
+            ],
+        )
+
+        async with factory() as session:
+            acct = Account(name="Test Account")
+            session.add(acct)
+            await session.flush()
+            ci = CsvImport(
+                account_id=acct.id,
+                filename="test.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            session.add(ci)
+            await session.commit()
+            account_id, ci_id = acct.id, ci.id
+
+        rows = [
+            {
+                "Date": "2024-01-15",
+                "Amount": "-5.00",
+                "Description": "STARBUCKS #4821 SEATTLE WA  ",
+            }
+        ]
+        enrich_input = [
+            {
+                "index": 0,
+                "description": "STARBUCKS #4821 SEATTLE WA",
+                "amount": "-5.00",
+                "date": "2024-01-15",
+            }
+        ]
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=account_id,
+            csv_import_id=ci_id,
+        )
+
+        async with factory() as session:
+            result = await session.execute(
+                select(Transaction).where(Transaction.account_id == account_id)
+            )
+            txs = result.scalars().all()
+            assert len(txs) == 1
+            assert txs[0].description == "Starbucks Coffee"
+            assert txs[0].raw_description == "STARBUCKS #4821 SEATTLE WA"
+
+        await eng.dispose()
+
+    async def test_raw_description_null_when_no_desc_col(self, mocker):
+        eng = await self._setup_db()
+        factory = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[
+                {
+                    "index": 0,
+                    "description": "Grocery store",
+                    "merchant_name": None,
+                    "merchant_location": None,
+                    "category": None,
+                    "subcategory": None,
+                    "is_recurring": False,
+                }
+            ],
+        )
+
+        async with factory() as session:
+            acct = Account(name="No Desc Account")
+            session.add(acct)
+            await session.flush()
+            ci = CsvImport(
+                account_id=acct.id,
+                filename="nodesc.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            session.add(ci)
+            await session.commit()
+            account_id, ci_id = acct.id, ci.id
+
+        rows = [{"Date": "2024-01-15", "Amount": "-20.00"}]
+        enrich_input = [
+            {"index": 0, "description": "", "amount": "-20.00", "date": "2024-01-15"}
+        ]
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col=None,
+            account_id=account_id,
+            csv_import_id=ci_id,
+        )
+
+        async with factory() as session:
+            result = await session.execute(
+                select(Transaction).where(Transaction.account_id == account_id)
+            )
+            txs = result.scalars().all()
+            assert len(txs) == 1
+            assert txs[0].raw_description is None
+
+        await eng.dispose()
 
 
 # ---------------------------------------------------------------------------
