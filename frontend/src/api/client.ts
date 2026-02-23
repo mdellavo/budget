@@ -3,6 +3,7 @@ import type {
   CardHolderItem,
   CardHoldersResponse,
   CategoriesResponse,
+  CategoryTrendsResponse,
   ImportsResponse,
   ImportCsvResponse,
   ImportProgress,
@@ -332,6 +333,29 @@ export async function reEnrichImport(
   importId: number
 ): Promise<{ status: string; csv_import_id: number }> {
   return handleResponse(await fetch(`${BASE}/imports/${importId}/re-enrich`, { method: "POST" }));
+}
+
+export async function abortImport(
+  importId: number
+): Promise<{ status: string; csv_import_id: number }> {
+  return handleResponse(await fetch(`${BASE}/imports/${importId}/abort`, { method: "POST" }));
+}
+
+export interface CategoryTrendFilters {
+  date_from?: string; // "YYYY-MM"
+  date_to?: string; // "YYYY-MM"
+}
+
+export async function getCategoryTrends(
+  filters: CategoryTrendFilters = {}
+): Promise<CategoryTrendsResponse> {
+  const params = new URLSearchParams();
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  const qs = params.toString();
+  return handleResponse<CategoryTrendsResponse>(
+    await fetch(`${BASE}/category-trends${qs ? `?${qs}` : ""}`)
+  );
 }
 
 export async function importCsv(

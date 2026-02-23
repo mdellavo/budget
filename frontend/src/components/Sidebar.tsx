@@ -12,6 +12,7 @@ const NAV = [
   { to: "/imports", label: "Imports", icon: "📋" },
   { to: "/recurring", label: "Recurring", icon: "🔁" },
   { to: "/monthly", label: "Monthly", icon: "📅" },
+  { to: "/trends", label: "Trends", icon: "📈" },
 ];
 
 export default function Sidebar() {

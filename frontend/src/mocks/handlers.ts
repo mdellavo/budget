@@ -35,4 +35,5 @@ export const handlers = [
   http.get("/api/cardholders", () =>
     HttpResponse.json({ items: [], has_more: false, next_cursor: null })
   ),
+  http.get("/api/category-trends", () => HttpResponse.json({ items: [] })),
 ];

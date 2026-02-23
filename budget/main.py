@@ -167,6 +167,7 @@ async def _run_enrichment(
                         attempt,
                         3,
                         csv_import_id,
+                        exc_info=True,
                     )
             await asyncio.sleep(2**attempt)  # 2s, 4s between retries (outside sem)
 
@@ -261,6 +262,19 @@ async def _run_enrichment(
 
             await csq.increment_enriched(csv_import_id, attempted)
             await db.commit()
+
+            # Check for abort between batches
+            async with AsyncSessionLocal() as abort_check:
+                imp_check = await CsvImportQueries(abort_check).get_by_id(csv_import_id)
+                if imp_check and imp_check.status == "aborted":
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    logger.info(
+                        "Background enrichment aborted for csv_import_id=%d",
+                        csv_import_id,
+                    )
+                    return  # Do NOT mark complete
 
     async with AsyncSessionLocal() as db:
         csq = CsvImportQueries(db)
@@ -445,6 +459,22 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
             "income_sources": income_sources,
             "expense_categories": expense_categories,
         },
+    }
+
+
+@app.get("/category-trends")
+async def get_category_trends(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    q = AnalyticsQueries(db)
+    rows = await q.get_category_trends(date_from, date_to)
+    return {
+        "items": [
+            {"month": r.month, "category": r.category, "total": str(r.total)}
+            for r in rows
+        ]
     }
 
 
@@ -664,7 +694,8 @@ async def get_import_progress(import_id: int, db: AsyncSession = Depends(get_db)
         "csv_import_id": csv_import.id,
         "row_count": csv_import.row_count,
         "enriched_rows": csv_import.enriched_rows,
-        "complete": csv_import.enriched_rows >= csv_import.row_count,
+        "complete": csv_import.status == "complete",
+        "aborted": csv_import.status == "aborted",
     }
 
 
@@ -723,6 +754,7 @@ async def _run_reenrichment_for_import(csv_import_id: int) -> None:
                         batch_num,
                         attempt,
                         csv_import_id,
+                        exc_info=True,
                     )
             await asyncio.sleep(2**attempt)
 
@@ -789,11 +821,38 @@ async def _run_reenrichment_for_import(csv_import_id: int) -> None:
             await csq.increment_enriched(csv_import_id, len(batch_results))
             await db.commit()
 
+            # Check for abort between batches
+            async with AsyncSessionLocal() as abort_check:
+                imp_check = await CsvImportQueries(abort_check).get_by_id(csv_import_id)
+                if imp_check and imp_check.status == "aborted":
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    logger.info(
+                        "Re-enrichment aborted for csv_import_id=%d", csv_import_id
+                    )
+                    return  # Do NOT mark complete
+
     async with AsyncSessionLocal() as db:
         await CsvImportQueries(db).mark_complete(csv_import_id)
         await db.commit()
 
     logger.info("Re-enrichment complete for csv_import_id=%d", csv_import_id)
+
+
+@app.post("/imports/{import_id}/abort")
+async def abort_import(import_id: int, db: AsyncSession = Depends(get_db)):
+    q = CsvImportQueries(db)
+    imp = await q.get_by_id(import_id)
+    if not imp:
+        raise HTTPException(status_code=404, detail="Import not found")
+    if imp.status != "in-progress":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot abort import with status '{imp.status}'",
+        )
+    await q.mark_aborted(import_id)
+    return {"status": "aborted", "csv_import_id": import_id}
 
 
 @app.post("/imports/{import_id}/re-enrich")

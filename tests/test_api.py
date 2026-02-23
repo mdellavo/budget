@@ -809,6 +809,147 @@ class TestAnalytics:
 
 
 # ---------------------------------------------------------------------------
+# Category Trends
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryTrends:
+    async def test_empty_response_when_no_transactions(self, client):
+        r = await client.get("/category-trends")
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+    async def test_returns_items_grouped_by_month_and_category(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food", "Groceries")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            txn_date=date(2024, 1, 10),
+            subcategory_id=sub.id,
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-30.00"),
+            txn_date=date(2024, 1, 20),
+            subcategory_id=sub.id,
+        )
+        r = await client.get("/category-trends")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["month"] == "2024-01"
+        assert items[0]["category"] == "Food"
+        assert float(items[0]["total"]) == pytest.approx(-80.0)
+
+    async def test_groups_across_multiple_months_and_categories(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat1, sub1 = await make_category("Food", "Restaurants")
+        cat2, sub2 = await make_category("Transport", "Gas")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-100.00"),
+            txn_date=date(2024, 1, 5),
+            subcategory_id=sub1.id,
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-40.00"),
+            txn_date=date(2024, 1, 10),
+            subcategory_id=sub2.id,
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-120.00"),
+            txn_date=date(2024, 2, 5),
+            subcategory_id=sub1.id,
+        )
+        r = await client.get("/category-trends")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        months = {(i["month"], i["category"]) for i in items}
+        assert ("2024-01", "Food") in months
+        assert ("2024-01", "Transport") in months
+        assert ("2024-02", "Food") in months
+
+    async def test_date_from_filter(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, sub = await make_category("Food", "Groceries")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            txn_date=date(2023, 12, 15),
+            subcategory_id=sub.id,
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-70.00"),
+            txn_date=date(2024, 1, 10),
+            subcategory_id=sub.id,
+        )
+        r = await client.get("/category-trends", params={"date_from": "2024-01"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert all(i["month"] >= "2024-01" for i in items)
+        assert len(items) == 1
+        assert items[0]["month"] == "2024-01"
+
+    async def test_date_to_filter(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _, sub = await make_category("Food", "Groceries")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            txn_date=date(2024, 1, 10),
+            subcategory_id=sub.id,
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-70.00"),
+            txn_date=date(2024, 3, 10),
+            subcategory_id=sub.id,
+        )
+        r = await client.get("/category-trends", params={"date_to": "2024-02"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert all(i["month"] <= "2024-02" for i in items)
+        assert len(items) == 1
+        assert items[0]["month"] == "2024-01"
+
+    async def test_excludes_income_transactions(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        # Income transaction — should NOT appear
+        await make_transaction(
+            acct.id, amount=Decimal("1000.00"), txn_date=date(2024, 1, 1)
+        )
+        r = await client.get("/category-trends")
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+    async def test_uncategorized_label(self, client, make_account, make_transaction):
+        acct = await make_account()
+        # Expense with no subcategory → should appear as "Uncategorized"
+        await make_transaction(
+            acct.id, amount=Decimal("-25.00"), txn_date=date(2024, 1, 5)
+        )
+        r = await client.get("/category-trends")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["category"] == "Uncategorized"
+
+
+# ---------------------------------------------------------------------------
 # Import CSV endpoint
 # ---------------------------------------------------------------------------
 
@@ -1162,6 +1303,96 @@ class TestReEnrichImport:
         await db_session.refresh(ci)
         assert ci.status == "in-progress"
         assert ci.enriched_rows == 0
+
+
+class TestAbortImport:
+    async def test_not_found(self, client):
+        r = await client.post("/imports/99999/abort")
+        assert r.status_code == 404
+
+    async def test_cannot_abort_complete(self, client, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="done.csv",
+            row_count=5,
+            enriched_rows=5,
+            status="complete",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.post(f"/imports/{ci.id}/abort")
+        assert r.status_code == 409
+
+    async def test_cannot_abort_already_aborted(self, client, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="stopped.csv",
+            row_count=5,
+            enriched_rows=2,
+            status="aborted",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.post(f"/imports/{ci.id}/abort")
+        assert r.status_code == 409
+
+    async def test_success(self, client, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="running.csv",
+            row_count=10,
+            enriched_rows=3,
+            status="in-progress",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.post(f"/imports/{ci.id}/abort")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "aborted"
+        assert data["csv_import_id"] == ci.id
+        await db_session.refresh(ci)
+        assert ci.status == "aborted"
+
+    async def test_progress_has_aborted_field(self, client, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="aborted.csv",
+            row_count=10,
+            enriched_rows=3,
+            status="aborted",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.get(f"/imports/{ci.id}/progress")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["aborted"] is True
+        assert data["complete"] is False
+
+    async def test_re_enrich_allowed_on_aborted(
+        self, client, db_session, make_account, mocker
+    ):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="retry.csv",
+            row_count=5,
+            enriched_rows=2,
+            status="aborted",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        mocker.patch("budget.main._run_reenrichment_for_import", new=AsyncMock())
+        r = await client.post(f"/imports/{ci.id}/re-enrich")
+        assert r.status_code == 200
+        assert r.json()["status"] == "processing"
+        await db_session.refresh(ci)
+        assert ci.status == "in-progress"
 
 
 class TestClassifyGap:

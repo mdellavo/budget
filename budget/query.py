@@ -97,6 +97,31 @@ class AnalyticsQueries:
         ).all()
         return rows
 
+    async def get_category_trends(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list:
+        month_col = func.strftime("%Y-%m", Transaction.date)
+        stmt = (
+            select(
+                month_col.label("month"),
+                func.coalesce(Category.name, "Uncategorized").label("category"),
+                func.sum(Transaction.amount).label("total"),
+            )
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .outerjoin(Category, Subcategory.category_id == Category.id)
+            .where(Transaction.amount < 0)
+            .group_by(month_col, Category.name)
+            .order_by(month_col, Category.name)
+        )
+        if date_from:
+            stmt = stmt.where(month_col >= date_from)
+        if date_to:
+            stmt = stmt.where(month_col <= date_to)
+        return (await self.db.execute(stmt)).all()
+
     async def get_overview_summary(self) -> dict:
         transaction_count = (
             await self.db.scalar(select(func.count(Transaction.id))) or 0
@@ -677,6 +702,12 @@ class CsvImportQueries:
         await self.db.execute(
             update(CsvImport).where(CsvImport.id == import_id).values(status="complete")
         )
+
+    async def mark_aborted(self, import_id: int) -> None:
+        await self.db.execute(
+            update(CsvImport).where(CsvImport.id == import_id).values(status="aborted")
+        )
+        await self.db.commit()
 
     async def increment_enriched(self, import_id: int, count: int) -> None:
         await self.db.execute(

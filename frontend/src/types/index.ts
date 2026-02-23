@@ -112,7 +112,7 @@ export interface ImportItem {
   row_count: number;
   enriched_rows: number;
   transaction_count: number;
-  status: "in-progress" | "complete";
+  status: "in-progress" | "complete" | "aborted";
 }
 
 export interface ImportsResponse {
@@ -135,6 +135,7 @@ export interface ImportProgress {
   row_count: number;
   enriched_rows: number;
   complete: boolean;
+  aborted: boolean;
 }
 
 export interface RecurringItem {
@@ -183,6 +184,16 @@ export interface MonthlyReport {
 export interface SankeyNode {
   name: string;
   amount: string; // numeric string, may be negative for expense_categories
+}
+
+export interface CategoryTrendItem {
+  month: string; // "YYYY-MM"
+  category: string;
+  total: string; // negative Decimal string (expenses)
+}
+
+export interface CategoryTrendsResponse {
+  items: CategoryTrendItem[];
 }
 
 export interface OverviewData {
