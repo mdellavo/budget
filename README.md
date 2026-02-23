@@ -79,9 +79,6 @@ npm run format        # Prettier auto-format
 
 ### AI-powered analysis
 
-- extract card number and card holder name
-- spinner on sidebar if active imports running
-
 - [ ] **Spend insights / narrative** — monthly summary email or dashboard card: "your biggest change this month was dining up 40%, driven by 3 visits to Nobu"; year-over-year and seasonal pattern detection
 - [ ] **Anomaly & alert detection** — flag unusual charges for a known merchant, first-time merchant appearances, duplicate transactions, and bill amount changes (e.g. subscription price increase)
 - [ ] **Forecasting** — project end-of-month spend by category at current pace; cash flow forecast based on known recurring income and expenses

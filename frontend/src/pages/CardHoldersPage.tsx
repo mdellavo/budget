@@ -51,7 +51,11 @@ function DetailsModal({
       >
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            {cardholder.card_number ?? <span className="text-gray-400 italic">No card number</span>}
+            {cardholder.card_number ? (
+              `ending in ${cardholder.card_number}`
+            ) : (
+              <span className="text-gray-400 italic">No card number</span>
+            )}
           </h2>
           <button
             onClick={onClose}
@@ -65,7 +69,11 @@ function DetailsModal({
           <div className="flex justify-between">
             <dt className="text-gray-500">Card Number</dt>
             <dd className="font-mono text-gray-800">
-              {cardholder.card_number ?? <span className="text-gray-400 italic">none</span>}
+              {cardholder.card_number ? (
+                `ending in ${cardholder.card_number}`
+              ) : (
+                <span className="text-gray-400 italic">none</span>
+              )}
             </dd>
           </div>
           <div className="flex justify-between">
@@ -429,7 +437,11 @@ export default function CardHoldersPage() {
                         onClick={() => setDetailsCardholder(row)}
                         className="font-mono text-indigo-600 hover:underline text-left"
                       >
-                        {row.card_number ?? <span className="text-gray-400 italic">none</span>}
+                        {row.card_number ? (
+                          `ending in ${row.card_number}`
+                        ) : (
+                          <span className="text-gray-400 italic">none</span>
+                        )}
                       </button>
                     </td>
                     <td className="px-4 py-2 text-gray-600">

@@ -5,6 +5,7 @@ import {
   importCsv,
   getImportProgress,
   reEnrichImport,
+  abortImport,
   ApiResponseError,
 } from "../api/client";
 import type { ImportFilters } from "../api/client";
@@ -82,6 +83,7 @@ export default function ImportsPage() {
   const [importState, setImportState] = useState<ImportState>({ status: "idle" });
   const [enrichedRows, setEnrichedRows] = useState(0);
   const [enrichmentComplete, setEnrichmentComplete] = useState(false);
+  const [enrichmentAborted, setEnrichmentAborted] = useState(false);
   const [accountName, setAccountName] = useState("");
   const [accountType, setAccountType] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -116,13 +118,16 @@ export default function ImportsPage() {
   }, [appliedFilters, sortBy, sortDir, fetchFirstPage]);
 
   useEffect(() => {
-    if (importState.status !== "success" || enrichmentComplete) return;
+    if (importState.status !== "success" || enrichmentComplete || enrichmentAborted) return;
     const id = setInterval(async () => {
       try {
         const p = await getImportProgress(importState.data.csv_import_id);
         setEnrichedRows(p.enriched_rows);
         if (p.complete) {
           setEnrichmentComplete(true);
+          fetchFirstPage(appliedFilters, sortBy, sortDir);
+        } else if (p.aborted) {
+          setEnrichmentAborted(true);
           fetchFirstPage(appliedFilters, sortBy, sortDir);
         }
       } catch {
@@ -134,6 +139,7 @@ export default function ImportsPage() {
     importState.status,
     importState.status === "success" ? importState.data.csv_import_id : null,
     enrichmentComplete,
+    enrichmentAborted,
     fetchFirstPage,
     appliedFilters,
     sortBy,
@@ -210,17 +216,33 @@ export default function ImportsPage() {
     setAccountType("");
     setEnrichedRows(0);
     setEnrichmentComplete(false);
+    setEnrichmentAborted(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleReEnrich(importId: number) {
     setPages((prev) =>
       prev.map((page) =>
-        page.map((r) => (r.id === importId ? { ...r, status: "in-progress", enriched_rows: 0 } : r))
+        page.map((r) =>
+          r.id === importId ? { ...r, status: "in-progress" as const, enriched_rows: 0 } : r
+        )
       )
     );
     try {
       await reEnrichImport(importId);
+    } catch {
+      fetchFirstPage(appliedFilters, sortBy, sortDir);
+    }
+  }
+
+  async function handleAbort(importId: number) {
+    setPages((prev) =>
+      prev.map((page) =>
+        page.map((r) => (r.id === importId ? { ...r, status: "aborted" as const } : r))
+      )
+    );
+    try {
+      await abortImport(importId);
     } catch {
       fetchFirstPage(appliedFilters, sortBy, sortDir);
     }
@@ -270,6 +292,8 @@ export default function ImportsPage() {
               <h2 className="text-base font-semibold text-green-900 mb-1">Import started</h2>
               {enrichmentComplete ? (
                 <p className="text-sm text-green-800 mb-4">Enrichment complete.</p>
+              ) : enrichmentAborted ? (
+                <p className="text-sm text-orange-700 mb-4">Import was aborted.</p>
               ) : (
                 <div className="mb-4">
                   <p className="text-sm text-green-800 mb-2">
@@ -545,11 +569,17 @@ export default function ImportsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-2">
-                    {row.status === "complete" ? (
+                    {row.status === "complete" || row.status === "aborted" ? (
                       <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">
-                          Complete
-                        </span>
+                        {row.status === "complete" ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">
+                            Complete
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+                            Aborted
+                          </span>
+                        )}
                         <button
                           onClick={() => handleReEnrich(row.id)}
                           className="text-xs text-indigo-600 hover:underline focus:outline-none"
@@ -561,9 +591,17 @@ export default function ImportsPage() {
                       <div className="min-w-[120px]">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-gray-500">Enriching…</span>
-                          <span className="text-xs text-gray-500">
-                            {row.enriched_rows}/{row.row_count}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">
+                              {row.enriched_rows}/{row.row_count}
+                            </span>
+                            <button
+                              onClick={() => handleAbort(row.id)}
+                              className="text-xs text-red-500 hover:text-red-700 hover:underline focus:outline-none"
+                            >
+                              Abort
+                            </button>
+                          </div>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1.5">
                           <div

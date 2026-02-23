@@ -283,6 +283,93 @@ describe("ImportsPage", () => {
     await waitFor(() => expect(screen.queryByText("Complete")).not.toBeInTheDocument());
   });
 
+  it("shows Abort button on in-progress rows", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_IN_PROGRESS],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Enriching…");
+    expect(screen.getByRole("button", { name: /abort/i })).toBeInTheDocument();
+  });
+
+  it("does not show Abort button on complete rows", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    expect(screen.queryByRole("button", { name: /abort/i })).not.toBeInTheDocument();
+  });
+
+  it("clicking Abort calls POST /api/imports/{id}/abort and optimistically shows Aborted badge", async () => {
+    const user = userEvent.setup();
+    let apiCalled = false;
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_IN_PROGRESS],
+          has_more: false,
+          next_cursor: null,
+        })
+      ),
+      http.post(`/api/imports/${IMPORT_ITEM_IN_PROGRESS.id}/abort`, () => {
+        apiCalled = true;
+        return HttpResponse.json({
+          status: "aborted",
+          csv_import_id: IMPORT_ITEM_IN_PROGRESS.id,
+        });
+      })
+    );
+    renderPage();
+    await screen.findByText("Enriching…");
+    await user.click(screen.getByRole("button", { name: /abort/i }));
+    expect(apiCalled).toBe(true);
+    await waitFor(() => expect(screen.queryByText("Enriching…")).not.toBeInTheDocument());
+    expect(screen.getByText("Aborted")).toBeInTheDocument();
+  });
+
+  it("shows Aborted badge for aborted imports", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [{ ...IMPORT_ITEM_IN_PROGRESS, status: "aborted" }],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Aborted");
+    expect(screen.queryByText("Enriching…")).not.toBeInTheDocument();
+  });
+
+  it("shows Re-enrich button on aborted rows", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [{ ...IMPORT_ITEM_IN_PROGRESS, status: "aborted" }],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Aborted");
+    expect(screen.getByRole("button", { name: /re-enrich/i })).toBeInTheDocument();
+  });
+
   it("shows in-progress enrichment text in the success panel immediately after import", async () => {
     // Verify the initial enrichment progress display before any polling occurs.
     const user = userEvent.setup();

@@ -219,7 +219,7 @@ class TransactionEnricher:
         while True:
             response = self.client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=4096,
+                max_tokens=16384,
                 tools=tools,
                 tool_choice={"type": "any"},
                 messages=messages,
@@ -228,7 +228,11 @@ class TransactionEnricher:
             # Done — extract structured result
             for block in response.content:
                 if block.type == "tool_use" and block.name == "enrich_transactions":
-                    results = block.input["results"]
+                    results = block.input.get("results")
+                    if results is None:
+                        raise RuntimeError(
+                            f"enrich_transactions tool input missing 'results' key: {block.input}"
+                        )
                     elapsed = time.perf_counter() - start
                     logger.info(
                         "Enrichment batch %d complete in %.2fs", batch_num, elapsed
