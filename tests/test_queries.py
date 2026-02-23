@@ -6,7 +6,7 @@ Each test gets a fresh in-memory SQLite database via the engine/db_session fixtu
 from datetime import date
 from decimal import Decimal
 
-from budget.models import Merchant, Transaction
+from budget.models import CsvImport, Merchant, Transaction
 from budget.query import (
     AccountQueries,
     AnalyticsQueries,
@@ -196,6 +196,24 @@ class TestCsvImportQueries:
         csq = CsvImportQueries(db_session)
         result = await csq.find_by_filename("nonexistent.csv")
         assert result is None
+
+    async def test_reset_for_reenrichment(self, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="f.csv",
+            row_count=10,
+            enriched_rows=10,
+            status="complete",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        csq = CsvImportQueries(db_session)
+        await csq.reset_for_reenrichment(ci.id)
+        await db_session.commit()
+        await db_session.refresh(ci)
+        assert ci.status == "in-progress"
+        assert ci.enriched_rows == 0
 
 
 # ---------------------------------------------------------------------------

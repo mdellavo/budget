@@ -1124,6 +1124,46 @@ class TestParseDateAmount:
 # ---------------------------------------------------------------------------
 
 
+class TestReEnrichImport:
+    async def test_not_found(self, client):
+        r = await client.post("/imports/99999/re-enrich")
+        assert r.status_code == 404
+
+    async def test_already_in_progress(self, client, db_session, make_account):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="x.csv",
+            row_count=5,
+            enriched_rows=0,
+            status="in-progress",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        r = await client.post(f"/imports/{ci.id}/re-enrich")
+        assert r.status_code == 409
+
+    async def test_success(self, client, db_session, make_account, mocker):
+        acct = await make_account()
+        ci = CsvImport(
+            account_id=acct.id,
+            filename="z.csv",
+            row_count=1,
+            enriched_rows=1,
+            status="complete",
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        mocker.patch("budget.main._run_reenrichment_for_import", new=AsyncMock())
+        r = await client.post(f"/imports/{ci.id}/re-enrich")
+        assert r.status_code == 200
+        assert r.json()["status"] == "processing"
+        assert r.json()["csv_import_id"] == ci.id
+        await db_session.refresh(ci)
+        assert ci.status == "in-progress"
+        assert ci.enriched_rows == 0
+
+
 class TestClassifyGap:
     def test_weekly(self):
         assert _classify_gap(7) == "weekly"

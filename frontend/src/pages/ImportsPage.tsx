@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
-import { listImports, importCsv, getImportProgress, ApiResponseError } from "../api/client";
+import {
+  listImports,
+  importCsv,
+  getImportProgress,
+  reEnrichImport,
+  ApiResponseError,
+} from "../api/client";
 import type { ImportFilters } from "../api/client";
 import type { ImportItem, ImportCsvResponse, ColumnMapping } from "../types";
 
@@ -205,6 +211,19 @@ export default function ImportsPage() {
     setEnrichedRows(0);
     setEnrichmentComplete(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleReEnrich(importId: number) {
+    setPages((prev) =>
+      prev.map((page) =>
+        page.map((r) => (r.id === importId ? { ...r, status: "in-progress", enriched_rows: 0 } : r))
+      )
+    );
+    try {
+      await reEnrichImport(importId);
+    } catch {
+      fetchFirstPage(appliedFilters, sortBy, sortDir);
+    }
   }
 
   function handleCloseImportForm() {
@@ -527,9 +546,17 @@ export default function ImportsPage() {
                   </td>
                   <td className="px-4 py-2">
                     {row.status === "complete" ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">
-                        Complete
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">
+                          Complete
+                        </span>
+                        <button
+                          onClick={() => handleReEnrich(row.id)}
+                          className="text-xs text-indigo-600 hover:underline focus:outline-none"
+                        >
+                          Re-enrich
+                        </button>
+                      </div>
                     ) : (
                       <div className="min-w-[120px]">
                         <div className="flex items-center justify-between mb-1">

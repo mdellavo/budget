@@ -685,6 +685,13 @@ class CsvImportQueries:
             .values(enriched_rows=CsvImport.enriched_rows + count)
         )
 
+    async def reset_for_reenrichment(self, import_id: int) -> None:
+        await self.db.execute(
+            update(CsvImport)
+            .where(CsvImport.id == import_id)
+            .values(status="in-progress", enriched_rows=0)
+        )
+
 
 class MerchantQueries:
     def __init__(self, db: AsyncSession) -> None:

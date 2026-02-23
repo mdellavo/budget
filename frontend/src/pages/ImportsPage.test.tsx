@@ -227,6 +227,62 @@ describe("ImportsPage", () => {
     expect(screen.queryByLabelText(/account name/i)).not.toBeInTheDocument();
   });
 
+  it("shows Re-enrich button on complete imports", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    expect(screen.getByRole("button", { name: /re-enrich/i })).toBeInTheDocument();
+  });
+
+  it("does not show Re-enrich button on in-progress imports", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_IN_PROGRESS],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Enriching…");
+    expect(screen.queryByRole("button", { name: /re-enrich/i })).not.toBeInTheDocument();
+  });
+
+  it("clicking Re-enrich calls API and optimistically switches row to in-progress", async () => {
+    const user = userEvent.setup();
+    let apiCalled = false;
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      ),
+      http.post(`/api/imports/${IMPORT_ITEM_COMPLETE.id}/re-enrich`, () => {
+        apiCalled = true;
+        return HttpResponse.json({
+          status: "processing",
+          csv_import_id: IMPORT_ITEM_COMPLETE.id,
+        });
+      })
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    await user.click(screen.getByRole("button", { name: /re-enrich/i }));
+    expect(apiCalled).toBe(true);
+    await waitFor(() => expect(screen.queryByText("Complete")).not.toBeInTheDocument());
+  });
+
   it("shows in-progress enrichment text in the success panel immediately after import", async () => {
     // Verify the initial enrichment progress display before any polling occurs.
     const user = userEvent.setup();

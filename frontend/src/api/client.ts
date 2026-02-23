@@ -328,6 +328,12 @@ export async function reEnrichTransactions(ids: number[]): Promise<ReEnrichRespo
   );
 }
 
+export async function reEnrichImport(
+  importId: number
+): Promise<{ status: string; csv_import_id: number }> {
+  return handleResponse(await fetch(`${BASE}/imports/${importId}/re-enrich`, { method: "POST" }));
+}
+
 export async function importCsv(
   file: File,
   accountName: string,
