@@ -10,6 +10,7 @@ from budget.models import Merchant, Transaction
 from budget.query import (
     AccountQueries,
     AnalyticsQueries,
+    CardHolderQueries,
     CategoryQueries,
     CsvImportQueries,
     MerchantQueries,
@@ -608,6 +609,202 @@ class TestTransactionQueries:
         results = await txq.get_by_ids([tx.id, 99999])
         assert len(results) == 1
         assert results[0].id == tx.id
+
+    async def test_build_conditions_cardholder(self, db_session):
+        txq = TransactionQueries(db_session)
+        conds = txq.build_conditions(cardholder="1234")
+        assert len(conds) == 1
+
+    async def test_filter_by_cardholder_card_number(
+        self, db_session, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("1234")
+        await make_transaction(acct.id, cardholder_id=ch.id, description="Card tx")
+        await make_transaction(acct.id, description="No card tx")
+        txq = TransactionQueries(db_session)
+        conds = txq.build_conditions(cardholder="1234")
+        items, _, _ = await txq.list(
+            conds, sort_by="date", sort_dir="desc", limit=50, after_id=None
+        )
+        assert len(items) == 1
+        assert items[0].description == "Card tx"
+
+    async def test_filter_by_cardholder_name(
+        self, db_session, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("9999", name="Alice")
+        await make_transaction(acct.id, cardholder_id=ch.id, description="Alice tx")
+        await make_transaction(acct.id, description="No card tx")
+        txq = TransactionQueries(db_session)
+        conds = txq.build_conditions(cardholder="alice")
+        items, _, _ = await txq.list(
+            conds, sort_by="date", sort_dir="desc", limit=50, after_id=None
+        )
+        assert len(items) == 1
+        assert items[0].description == "Alice tx"
+
+
+# ---------------------------------------------------------------------------
+# CardHolderQueries
+# ---------------------------------------------------------------------------
+
+
+class TestCardHolderQueries:
+    async def test_find_or_create_new(self, db_session):
+        chq = CardHolderQueries(db_session)
+        cache: dict[str, int] = {}
+        ch_id = await chq.find_or_create_for_enrichment("1234", cache)
+        await db_session.commit()
+        assert ch_id is not None
+        assert cache["1234"] == ch_id
+
+    async def test_find_or_create_existing(self, db_session, make_cardholder):
+        ch = await make_cardholder("5678")
+        chq = CardHolderQueries(db_session)
+        cache: dict[str, int] = {}
+        ch_id = await chq.find_or_create_for_enrichment("5678", cache)
+        await db_session.commit()
+        assert ch_id == ch.id
+
+    async def test_find_or_create_uses_cache(self, db_session):
+        chq = CardHolderQueries(db_session)
+        cache: dict[str, int] = {}
+        id1 = await chq.find_or_create_for_enrichment("9999", cache)
+        await db_session.commit()
+        id2 = await chq.find_or_create_for_enrichment("9999", cache)
+        assert id1 == id2
+        assert cache["9999"] == id1
+
+    async def test_get_by_id_found(self, db_session, make_cardholder):
+        ch = await make_cardholder("1234", name="Alice")
+        chq = CardHolderQueries(db_session)
+        result = await chq.get_by_id(ch.id)
+        assert result is not None
+        assert result.card_number == "1234"
+        assert result.name == "Alice"
+
+    async def test_get_by_id_not_found(self, db_session):
+        chq = CardHolderQueries(db_session)
+        result = await chq.get_by_id(99999)
+        assert result is None
+
+    async def test_update_name_and_card_number(self, db_session, make_cardholder):
+        ch = await make_cardholder("1234", name="Old Name")
+        chq = CardHolderQueries(db_session)
+        await chq.update(ch, name="New Name", card_number="5678")
+        await db_session.commit()
+        await db_session.refresh(ch)
+        assert ch.name == "New Name"
+        assert ch.card_number == "5678"
+
+    async def test_paginate_empty(self, db_session):
+        chq = CardHolderQueries(db_session)
+        items, has_more, cursor = await chq.paginate(
+            name=None,
+            card_number=None,
+            sort_by="card_number",
+            sort_dir="asc",
+            limit=50,
+            after_id=None,
+        )
+        assert items == []
+        assert has_more is False
+        assert cursor is None
+
+    async def test_paginate_with_stats(
+        self, db_session, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("1234", name="Alice")
+        await make_transaction(acct.id, cardholder_id=ch.id, amount=Decimal("-10.00"))
+        await make_transaction(acct.id, cardholder_id=ch.id, amount=Decimal("-20.00"))
+        chq = CardHolderQueries(db_session)
+        items, has_more, cursor = await chq.paginate(
+            name=None,
+            card_number=None,
+            sort_by="card_number",
+            sort_dir="asc",
+            limit=50,
+            after_id=None,
+        )
+        assert len(items) == 1
+        assert items[0].card_number == "1234"
+        assert items[0].name == "Alice"
+        assert items[0].transaction_count == 2
+        assert items[0].total_amount == Decimal("-30.00")
+
+    async def test_paginate_filter_card_number(self, db_session, make_cardholder):
+        await make_cardholder("1234")
+        await make_cardholder("5678")
+        chq = CardHolderQueries(db_session)
+        items, _, _ = await chq.paginate(
+            name=None,
+            card_number="12",
+            sort_by="card_number",
+            sort_dir="asc",
+            limit=50,
+            after_id=None,
+        )
+        assert len(items) == 1
+        assert items[0].card_number == "1234"
+
+    async def test_paginate_filter_name(self, db_session, make_cardholder):
+        await make_cardholder("1234", name="Alice")
+        await make_cardholder("5678", name="Bob")
+        chq = CardHolderQueries(db_session)
+        items, _, _ = await chq.paginate(
+            name="alic",
+            card_number=None,
+            sort_by="name",
+            sort_dir="asc",
+            limit=50,
+            after_id=None,
+        )
+        assert len(items) == 1
+        assert items[0].name == "Alice"
+
+    async def test_get_with_stats(
+        self, db_session, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("4321")
+        await make_transaction(acct.id, cardholder_id=ch.id, amount=Decimal("-50.00"))
+        chq = CardHolderQueries(db_session)
+        row = await chq.get_with_stats(ch.id)
+        assert row.id == ch.id
+        assert row.transaction_count == 1
+        assert row.total_amount == Decimal("-50.00")
+
+    async def test_paginate_cursor_pagination(self, db_session, make_cardholder):
+        for i in range(1, 6):
+            await make_cardholder(f"{i:04d}")
+        chq = CardHolderQueries(db_session)
+        page1, has_more, cursor = await chq.paginate(
+            name=None,
+            card_number=None,
+            sort_by="card_number",
+            sort_dir="asc",
+            limit=3,
+            after_id=None,
+        )
+        assert len(page1) == 3
+        assert has_more is True
+        assert cursor is not None
+        page2, has_more2, _ = await chq.paginate(
+            name=None,
+            card_number=None,
+            sort_by="card_number",
+            sort_dir="asc",
+            limit=3,
+            after_id=cursor,
+        )
+        assert len(page2) == 2
+        assert has_more2 is False
+        ids1 = {r.id for r in page1}
+        ids2 = {r.id for r in page2}
+        assert ids1.isdisjoint(ids2)
 
 
 # ---------------------------------------------------------------------------

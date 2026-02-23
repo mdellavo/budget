@@ -7,7 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from budget.database import Base, get_db
 from budget.main import app
-from budget.models import Account, Category, Merchant, Subcategory, Transaction
+from budget.models import (
+    Account,
+    CardHolder,
+    Category,
+    Merchant,
+    Subcategory,
+    Transaction,
+)
 
 
 @pytest_asyncio.fixture
@@ -86,6 +93,18 @@ async def make_category(db_session):
 
 
 @pytest_asyncio.fixture
+async def make_cardholder(db_session):
+    async def _make(card_number="1234", name=None):
+        ch = CardHolder(card_number=card_number, name=name)
+        db_session.add(ch)
+        await db_session.flush()
+        await db_session.commit()
+        return ch
+
+    return _make
+
+
+@pytest_asyncio.fixture
 async def make_transaction(db_session):
     async def _make(
         account_id,
@@ -97,6 +116,7 @@ async def make_transaction(db_session):
         is_recurring=False,
         csv_import_id=None,
         raw_description=None,
+        cardholder_id=None,
     ):
         if txn_date is None:
             txn_date = date(2024, 1, 15)
@@ -110,6 +130,7 @@ async def make_transaction(db_session):
             subcategory_id=subcategory_id,
             is_recurring=is_recurring,
             csv_import_id=csv_import_id,
+            cardholder_id=cardholder_id,
         )
         db_session.add(tx)
         await db_session.flush()

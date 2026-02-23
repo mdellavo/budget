@@ -47,6 +47,7 @@ const EMPTY_FILTERS = {
   import_id: "",
   is_recurring: "",
   uncategorized: "",
+  cardholder: "",
 };
 
 type FormFilters = typeof EMPTY_FILTERS;
@@ -65,6 +66,7 @@ function filtersFromParams(p: URLSearchParams): FormFilters {
     import_id: p.get("import_id") ?? "",
     is_recurring: p.get("is_recurring") ?? "",
     uncategorized: p.get("uncategorized") ?? "",
+    cardholder: p.get("cardholder") ?? "",
   };
 }
 
@@ -82,6 +84,7 @@ function buildParams(f: FormFilters, sb: SortKey, sd: "asc" | "desc"): URLSearch
   if (f.import_id) p.set("import_id", f.import_id);
   if (f.is_recurring) p.set("is_recurring", f.is_recurring);
   if (f.uncategorized) p.set("uncategorized", f.uncategorized);
+  if (f.cardholder) p.set("cardholder", f.cardholder);
   if (sb !== "date") p.set("sort_by", sb);
   if (sd !== "desc") p.set("sort_dir", sd);
   return p;
@@ -102,6 +105,7 @@ function toApiFilters(f: FormFilters): TransactionFilters {
   if (f.is_recurring === "true") out.is_recurring = true;
   else if (f.is_recurring === "false") out.is_recurring = false;
   if (f.uncategorized === "true") out.uncategorized = true;
+  if (f.cardholder) out.cardholder = f.cardholder;
   return out;
 }
 
@@ -122,6 +126,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
     category: tx.category ?? "",
     subcategory: tx.subcategory ?? "",
     notes: tx.notes ?? "",
+    card_number: tx.card_number ?? "",
   });
   const [saving, setSaving] = useState(false);
   const [reEnriching, setReEnriching] = useState(false);
@@ -199,6 +204,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
           category: updated.category ?? "",
           subcategory: updated.subcategory ?? "",
           notes: updated.notes ?? "",
+          card_number: updated.card_number ?? "",
         });
         onSaved(updated);
       }
@@ -219,6 +225,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         category: form.category.trim() || null,
         subcategory: form.subcategory.trim() || null,
         notes: form.notes.trim() || null,
+        card_number: form.card_number.trim() || null,
       };
       const updated = await updateTransaction(tx.id, body);
       onSaved(updated);
@@ -351,6 +358,15 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
               placeholder="Optional notes"
               className={inputClass}
             />
+
+            <label className="text-sm text-gray-700 font-medium text-right">Card number</label>
+            <input
+              type="text"
+              value={form.card_number}
+              onChange={(e) => setField("card_number", e.target.value)}
+              placeholder="e.g. 1234"
+              className={inputClass + " font-mono"}
+            />
           </div>
 
           {error && (
@@ -471,6 +487,14 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
             {tx.subcategory ?? <span className="text-gray-400">—</span>}
           </Row>
           <Row label="Notes">{tx.notes ?? <span className="text-gray-400">—</span>}</Row>
+          {(tx.cardholder_name || tx.card_number) && (
+            <Row label="Card">
+              {tx.card_number && <span className="font-mono">{tx.card_number}</span>}
+              {tx.cardholder_name && (
+                <span className="ml-2 text-gray-500">{tx.cardholder_name}</span>
+              )}
+            </Row>
+          )}
           <Row label="Recurring">
             {tx.is_recurring ? (
               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">
@@ -521,7 +545,12 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
 
 interface BulkEditBarProps {
   count: number;
-  onApply: (updates: { merchant: string; category: string; subcategory: string }) => void;
+  onApply: (updates: {
+    merchant: string;
+    category: string;
+    subcategory: string;
+    card_number: string;
+  }) => void;
   onClear: () => void;
   saving: boolean;
   error: string | null;
@@ -542,7 +571,12 @@ function BulkEditBar({
   reEnriching,
   reEnrichError,
 }: BulkEditBarProps) {
-  const [form, setForm] = useState({ merchant: "", category: "", subcategory: "" });
+  const [form, setForm] = useState({
+    merchant: "",
+    category: "",
+    subcategory: "",
+    card_number: "",
+  });
   const [merchantSuggestions, setMerchantSuggestions] = useState<string[]>([]);
   const [allCategoryRows, setAllCategoryRows] = useState<CategoryItem[]>([]);
 
@@ -599,7 +633,11 @@ function BulkEditBar({
     }
   }
 
-  const allEmpty = !form.merchant.trim() && !form.category.trim() && !form.subcategory.trim();
+  const allEmpty =
+    !form.merchant.trim() &&
+    !form.category.trim() &&
+    !form.subcategory.trim() &&
+    !form.card_number.trim();
 
   const inputClass =
     "border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500";
@@ -649,6 +687,16 @@ function BulkEditBar({
             suggestions={subcategorySuggestions}
             placeholder="(no change)"
             className={inputClass}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-500 font-medium">Card number</label>
+          <input
+            type="text"
+            value={form.card_number}
+            onChange={(e) => setForm((prev) => ({ ...prev, card_number: e.target.value }))}
+            placeholder="(no change)"
+            className={inputClass + " font-mono w-28"}
           />
         </div>
         <button
@@ -828,6 +876,7 @@ export default function TransactionsPage() {
     merchant: string;
     category: string;
     subcategory: string;
+    card_number: string;
   }) {
     setBulkSaving(true);
     setBulkError(null);
@@ -842,6 +891,7 @@ export default function TransactionsPage() {
           category: updates.category.trim() || tx.category || null,
           subcategory: updates.subcategory.trim() || tx.subcategory || null,
           notes: tx.notes,
+          card_number: updates.card_number.trim() || tx.card_number || null,
         });
         setPages((prev) =>
           prev.map((page) => page.map((r) => (r.id === updated.id ? updated : r)))
@@ -1065,6 +1115,16 @@ export default function TransactionsPage() {
               onChange={(e) => setField("account", e.target.value)}
               placeholder="e.g. Checking"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Card Holder</label>
+            <input
+              type="text"
+              value={filters.cardholder}
+              onChange={(e) => setField("cardholder", e.target.value)}
+              placeholder="e.g. 1234"
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <div className="flex flex-col gap-1">

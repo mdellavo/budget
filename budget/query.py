@@ -9,7 +9,15 @@ from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from .models import Account, Category, CsvImport, Merchant, Subcategory, Transaction
+from .models import (
+    Account,
+    CardHolder,
+    Category,
+    CsvImport,
+    Merchant,
+    Subcategory,
+    Transaction,
+)
 
 
 class AnalyticsQueries:
@@ -239,6 +247,157 @@ class CategoryQueries:
                 await self.db.flush()
             cache[key] = sc.id
         return cache[key]
+
+
+class CardHolderQueries:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get_by_id(self, cardholder_id: int) -> CardHolder | None:
+        return await self.db.get(CardHolder, cardholder_id)
+
+    async def find_or_create_for_enrichment(
+        self, card_number: str, cache: dict[str, int]
+    ) -> int:
+        if card_number in cache:
+            return cache[card_number]
+        existing = (
+            await self.db.execute(
+                select(CardHolder).where(CardHolder.card_number == card_number)
+            )
+        ).scalar_one_or_none()
+        if existing:
+            cache[card_number] = existing.id
+            return existing.id
+        ch = CardHolder(card_number=card_number)
+        self.db.add(ch)
+        await self.db.flush()
+        cache[card_number] = ch.id
+        return ch.id
+
+    async def get_with_stats(self, cardholder_id: int):  # type: ignore[return]
+        txn_count_expr = (
+            select(func.count(Transaction.id))
+            .where(Transaction.cardholder_id == CardHolder.id)
+            .correlate(CardHolder)
+            .scalar_subquery()
+        )
+        txn_total_expr = (
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.cardholder_id == CardHolder.id)
+            .correlate(CardHolder)
+            .scalar_subquery()
+        )
+        row = (
+            await self.db.execute(
+                select(
+                    CardHolder.id,
+                    CardHolder.name,
+                    CardHolder.card_number,
+                    txn_count_expr.label("transaction_count"),
+                    txn_total_expr.label("total_amount"),
+                ).where(CardHolder.id == cardholder_id)
+            )
+        ).one_or_none()
+        return row
+
+    async def update(
+        self, cardholder: CardHolder, name: str | None, card_number: str | None
+    ) -> None:
+        cardholder.name = name
+        cardholder.card_number = card_number
+
+    async def paginate(
+        self,
+        name: str | None,
+        card_number: str | None,
+        sort_by: str,
+        sort_dir: str,
+        limit: int,
+        after_id: int | None,
+    ) -> tuple[list, bool, int | None]:
+        txn_count_expr = (
+            select(func.count(Transaction.id))
+            .where(Transaction.cardholder_id == CardHolder.id)
+            .correlate(CardHolder)
+            .scalar_subquery()
+        )
+        txn_total_expr = (
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.cardholder_id == CardHolder.id)
+            .correlate(CardHolder)
+            .scalar_subquery()
+        )
+        sort_expr = {
+            "name": CardHolder.name,
+            "card_number": CardHolder.card_number,
+            "transaction_count": txn_count_expr,
+            "total_amount": txn_total_expr,
+        }[sort_by]
+
+        if sort_dir == "desc":
+            order_clauses = [sort_expr.desc().nulls_last(), CardHolder.id.desc()]
+        else:
+            order_clauses = [sort_expr.asc().nulls_last(), CardHolder.id.asc()]
+
+        conditions = []
+        if name:
+            conditions.append(CardHolder.name.ilike(f"%{name}%"))
+        if card_number:
+            conditions.append(CardHolder.card_number.ilike(f"%{card_number}%"))
+
+        if after_id is not None:
+            cur = await self.db.get(CardHolder, after_id)
+            if sort_by == "transaction_count":
+                cursor_val = await self.db.scalar(
+                    select(func.count(Transaction.id)).where(
+                        Transaction.cardholder_id == after_id
+                    )
+                )
+            elif sort_by == "total_amount":
+                cursor_val = await self.db.scalar(
+                    select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                        Transaction.cardholder_id == after_id
+                    )
+                )
+            else:
+                cursor_val = getattr(cur, sort_by)
+
+            id_cmp = (
+                (CardHolder.id < after_id)
+                if sort_dir == "desc"
+                else (CardHolder.id > after_id)
+            )
+            if cursor_val is None:
+                conditions.append(and_(sort_expr.is_(None), id_cmp))
+            else:
+                beyond = (
+                    (sort_expr < cursor_val)
+                    if sort_dir == "desc"
+                    else (sort_expr > cursor_val)
+                )
+                tied = and_(sort_expr == cursor_val, id_cmp)
+                conditions.append(or_(beyond, tied, sort_expr.is_(None)))
+
+        rows = (
+            await self.db.execute(
+                select(
+                    CardHolder.id,
+                    CardHolder.name,
+                    CardHolder.card_number,
+                    txn_count_expr.label("transaction_count"),
+                    txn_total_expr.label("total_amount"),
+                )
+                .where(*conditions)
+                .order_by(*order_clauses)
+                .limit(limit + 1)
+            )
+        ).all()
+
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        next_cursor = items[-1].id if has_more and items else None
+        return items, has_more, next_cursor
 
 
 class AccountQueries:
@@ -740,6 +899,7 @@ class TransactionQueries:
         import_id=None,
         is_recurring=None,
         uncategorized=None,
+        cardholder=None,
     ) -> list:
         conditions = []
         if date_from:
@@ -778,6 +938,14 @@ class TransactionQueries:
             conditions.append(Transaction.is_recurring == is_recurring)
         if uncategorized:
             conditions.append(Transaction.subcategory_id.is_(None))
+        if cardholder:
+            ch_ids = select(CardHolder.id).where(
+                or_(
+                    CardHolder.card_number.ilike(f"%{cardholder}%"),
+                    CardHolder.name.ilike(f"%{cardholder}%"),
+                )
+            )
+            conditions.append(Transaction.cardholder_id.in_(ch_ids))
         return conditions
 
     async def count(self, conditions: list) -> int:
@@ -863,6 +1031,7 @@ class TransactionQueries:
                 selectinload(Transaction.subcategory).selectinload(
                     Subcategory.category
                 ),
+                selectinload(Transaction.cardholder),
             )
             .order_by(*order_clauses)
             .limit(limit + 1)
@@ -885,6 +1054,7 @@ class TransactionQueries:
                     selectinload(Transaction.subcategory).selectinload(
                         Subcategory.category
                     ),
+                    selectinload(Transaction.cardholder),
                 )
             )
         ).scalar_one_or_none()
@@ -899,6 +1069,7 @@ class TransactionQueries:
                 selectinload(Transaction.subcategory).selectinload(
                     Subcategory.category
                 ),
+                selectinload(Transaction.cardholder),
             )
         )
         return list(result.scalars().all())

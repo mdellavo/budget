@@ -90,6 +90,18 @@ class Merchant(Base):
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="merchant")
 
 
+class CardHolder(Base):
+    __tablename__ = "cardholders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200))
+    card_number: Mapped[str | None] = mapped_column(String(20), unique=True)
+
+    transactions: Mapped[list["Transaction"]] = relationship(
+        back_populates="cardholder"
+    )
+
+
 class Tag(Base):
     __tablename__ = "tags"
 
@@ -113,6 +125,7 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id"))
     subcategory_id: Mapped[int | None] = mapped_column(ForeignKey("subcategories.id"))
+    cardholder_id: Mapped[int | None] = mapped_column(ForeignKey("cardholders.id"))
     notes: Mapped[str | None] = mapped_column(String(1000))
     is_recurring: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"
@@ -123,6 +136,9 @@ class Transaction(Base):
     csv_import: Mapped[CsvImport | None] = relationship(back_populates="transactions")
     merchant: Mapped["Merchant | None"] = relationship(back_populates="transactions")
     subcategory: Mapped[Subcategory | None] = relationship(
+        back_populates="transactions"
+    )
+    cardholder: Mapped["CardHolder | None"] = relationship(
         back_populates="transactions"
     )
     tags: Mapped[list[Tag]] = relationship(

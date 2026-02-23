@@ -9,6 +9,7 @@ import ImportsPage from "./pages/ImportsPage";
 import RecurringPage from "./pages/RecurringPage";
 import MonthlyPage from "./pages/MonthlyPage";
 import CategoriesPage from "./pages/CategoriesPage";
+import CardHoldersPage from "./pages/CardHoldersPage";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/monthly" element={<MonthlyPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/cardholders" element={<CardHoldersPage />} />
           </Routes>
         </main>
       </div>

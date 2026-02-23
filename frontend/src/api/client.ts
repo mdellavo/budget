@@ -1,5 +1,7 @@
 import type {
   AccountsResponse,
+  CardHolderItem,
+  CardHoldersResponse,
   CategoriesResponse,
   ImportsResponse,
   ImportCsvResponse,
@@ -51,6 +53,7 @@ export interface TransactionFilters {
   import_id?: number;
   is_recurring?: boolean;
   uncategorized?: boolean;
+  cardholder?: string;
   after?: number;
   limit?: number;
   sort_by?: "date" | "amount" | "description" | "merchant" | "category" | "account";
@@ -203,12 +206,53 @@ export async function parseQuery(query: string): Promise<ParseQueryResponse> {
   );
 }
 
+export interface CardHolderFilters {
+  name?: string;
+  card_number?: string;
+  after?: number;
+  limit?: number;
+  sort_by?: "name" | "card_number" | "transaction_count" | "total_amount";
+  sort_dir?: "asc" | "desc";
+}
+
+export async function listCardHolders(
+  filters: CardHolderFilters = {}
+): Promise<CardHoldersResponse> {
+  const params = new URLSearchParams();
+  for (const [key, val] of Object.entries(filters)) {
+    if (val !== undefined && val !== "") params.set(key, String(val));
+  }
+  const qs = params.toString();
+  return handleResponse<CardHoldersResponse>(
+    await fetch(`${BASE}/cardholders${qs ? `?${qs}` : ""}`)
+  );
+}
+
+export interface CardHolderUpdateBody {
+  name: string | null;
+  card_number: string | null;
+}
+
+export async function updateCardHolder(
+  id: number,
+  body: CardHolderUpdateBody
+): Promise<CardHolderItem> {
+  return handleResponse<CardHolderItem>(
+    await fetch(`${BASE}/cardholders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
 export interface TransactionUpdateBody {
   description: string;
   merchant_name: string | null;
   category: string | null;
   subcategory: string | null;
   notes: string | null;
+  card_number?: string | null;
 }
 
 export async function updateTransaction(

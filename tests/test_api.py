@@ -599,6 +599,140 @@ class TestTransactions:
         assert r.status_code == 502
         assert "AI enrichment failed" in r.json()["detail"]
 
+    async def test_list_filter_cardholder(
+        self, client, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("1234")
+        await make_transaction(acct.id, cardholder_id=ch.id, description="Card tx")
+        await make_transaction(acct.id, description="No card tx")
+        r = await client.get("/transactions", params={"cardholder": "1234"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["description"] == "Card tx"
+        assert items[0]["card_number"] == "1234"
+
+    async def test_patch_transaction_set_card_number(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id)
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "card_number": "1234",
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["card_number"] == "1234"
+
+    async def test_patch_transaction_clear_card_number(
+        self, client, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("1234")
+        tx = await make_transaction(acct.id, cardholder_id=ch.id)
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "card_number": None,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["card_number"] is None
+
+
+# ---------------------------------------------------------------------------
+# CardHolders
+# ---------------------------------------------------------------------------
+
+
+class TestCardHolders:
+    async def test_list_empty(self, client):
+        r = await client.get("/cardholders")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+        assert data["has_more"] is False
+
+    async def test_list_with_data(
+        self, client, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("1234", name="Alice")
+        await make_transaction(acct.id, cardholder_id=ch.id, amount=Decimal("-25.00"))
+        r = await client.get("/cardholders")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["card_number"] == "1234"
+        assert item["name"] == "Alice"
+        assert item["transaction_count"] == 1
+        assert float(item["total_amount"]) == pytest.approx(-25.0)
+
+    async def test_list_filter_card_number(self, client, make_cardholder):
+        await make_cardholder("1234")
+        await make_cardholder("5678")
+        r = await client.get("/cardholders", params={"card_number": "12"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["card_number"] == "1234"
+
+    async def test_list_filter_name(self, client, make_cardholder):
+        await make_cardholder("1234", name="Alice")
+        await make_cardholder("5678", name="Bob")
+        r = await client.get("/cardholders", params={"name": "alic"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["name"] == "Alice"
+
+    async def test_patch_cardholder(self, client, make_cardholder):
+        ch = await make_cardholder("1234", name="Old Name")
+        r = await client.patch(
+            f"/cardholders/{ch.id}",
+            json={"name": "New Name", "card_number": "5678"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name"] == "New Name"
+        assert data["card_number"] == "5678"
+        assert "transaction_count" in data
+        assert "total_amount" in data
+
+    async def test_patch_cardholder_not_found(self, client):
+        r = await client.patch(
+            "/cardholders/99999", json={"name": "X", "card_number": None}
+        )
+        assert r.status_code == 404
+
+    async def test_transaction_response_includes_cardholder_fields(
+        self, client, make_account, make_cardholder, make_transaction
+    ):
+        acct = await make_account()
+        ch = await make_cardholder("9999", name="Bob")
+        await make_transaction(acct.id, cardholder_id=ch.id)
+        r = await client.get("/transactions")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["card_number"] == "9999"
+        assert items[0]["cardholder_name"] == "Bob"
+
 
 # ---------------------------------------------------------------------------
 # Analytics

@@ -32,6 +32,8 @@ export interface TransactionItem {
   notes: string | null;
   is_recurring: boolean;
   raw_description: string | null;
+  cardholder_name: string | null;
+  card_number: string | null;
 }
 
 export interface TransactionsResponse {
@@ -45,6 +47,20 @@ export interface ColumnMapping {
   description: number | null;
   date: number | null;
   amount: number | null;
+}
+
+export interface CardHolderItem {
+  id: number;
+  name: string | null;
+  card_number: string | null;
+  transaction_count: number;
+  total_amount: string;
+}
+
+export interface CardHoldersResponse {
+  items: CardHolderItem[];
+  has_more: boolean;
+  next_cursor: number | null;
 }
 
 export interface MerchantItem {

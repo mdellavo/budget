@@ -136,6 +136,10 @@ Rules:
   e.g. "STARBUCKS #4821 SEATTLE WA" → "Seattle, WA"
   e.g. "AMZN MKTP US*1A2B3" → null
   e.g. "SQ *FARMERS MARKET BROOKLYN NY" → "Brooklyn, NY"
+- card_number: if the raw description contains "CARD XXXX" or "CARDXXXX" where XXXX is digits, extract those digits. Otherwise null.
+  e.g. "POS PURCHASE CARD 1234 STARBUCKS" → "1234"
+  e.g. "ACH DEBIT CARD5678 NETFLIX" → "5678"
+  e.g. "STARBUCKS #4821" → null
 - description: a short, human-readable summary of the transaction, Title Case
   Strip noise (store numbers, location codes, transaction IDs). If the raw description is already clean, keep it.
   e.g. "STARBUCKS #4821 SEATTLE WA" → "Starbucks Coffee"
@@ -164,6 +168,7 @@ ENRICHMENT_SCHEMA = {
                     "description": {"type": "string"},
                     "category": {"type": ["string", "null"]},
                     "subcategory": {"type": ["string", "null"]},
+                    "card_number": {"type": ["string", "null"]},
                 },
                 "required": [
                     "index",
@@ -173,6 +178,7 @@ ENRICHMENT_SCHEMA = {
                     "description",
                     "category",
                     "subcategory",
+                    "card_number",
                 ],
             },
         }

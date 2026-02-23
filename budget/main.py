@@ -37,6 +37,7 @@ from .models import Merchant, Transaction
 from .query import (
     AccountQueries,
     AnalyticsQueries,
+    CardHolderQueries,
     CategoryQueries,
     CsvImportQueries,
     MerchantQueries,
@@ -84,6 +85,14 @@ async def lifespan(app: FastAPI):
         try:
             await conn.execute(
                 text("ALTER TABLE transactions ADD COLUMN raw_description TEXT")
+            )
+        except Exception:
+            pass  # column already exists
+        try:
+            await conn.execute(
+                text(
+                    "ALTER TABLE transactions ADD COLUMN cardholder_id INTEGER REFERENCES cardholders(id)"
+                )
             )
         except Exception:
             pass  # column already exists
@@ -168,10 +177,12 @@ async def _run_enrichment(
     async with AsyncSessionLocal() as db:
         mq = MerchantQueries(db)
         cq = CategoryQueries(db)
+        chq = CardHolderQueries(db)
         csq = CsvImportQueries(db)
         merchant_cache: dict[str, tuple[int, bool]] = {}  # name → (id, has_location)
         category_cache: dict[str, int] = {}
         subcategory_cache: dict[tuple, int] = {}
+        cardholder_cache: dict[str, int] = {}
 
         for coro in asyncio.as_completed(tasks):
             try:
@@ -201,6 +212,7 @@ async def _run_enrichment(
                 mlocation = r.get("merchant_location")
                 cname = r.get("category")
                 scname = r.get("subcategory")
+                cn = r.get("card_number")
 
                 merchant_id = None
                 if mname:
@@ -221,6 +233,12 @@ async def _run_enrichment(
                         category_id, scname, subcategory_cache
                     )
 
+                cardholder_id = None
+                if cn:
+                    cardholder_id = await chq.find_or_create_for_enrichment(
+                        cn, cardholder_cache
+                    )
+
                 raw_description = row[desc_col].strip() if desc_col else None
                 description = r.get("description") or raw_description or ""
                 is_recurring = bool(r.get("is_recurring", False))
@@ -234,6 +252,7 @@ async def _run_enrichment(
                         amount=amount_val,
                         merchant_id=merchant_id,
                         subcategory_id=subcategory_id,
+                        cardholder_id=cardholder_id,
                         is_recurring=is_recurring,
                     )
                 )
@@ -766,6 +785,10 @@ async def list_transactions(
     uncategorized: bool | None = Query(
         None, description="true = only transactions with no category/subcategory"
     ),
+    cardholder: str | None = Query(
+        None,
+        description="Case-insensitive substring match on card number or cardholder name",
+    ),
     after: int | None = Query(
         None,
         description="Cursor: last seen transaction ID (from previous response's next_cursor)",
@@ -791,6 +814,7 @@ async def list_transactions(
         import_id=import_id,
         is_recurring=is_recurring,
         uncategorized=uncategorized,
+        cardholder=cardholder,
     )
     total_count = await txq.count(conditions)
     items, has_more, next_cursor = await txq.list(
@@ -815,6 +839,8 @@ async def list_transactions(
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
                 "raw_description": tx.raw_description,
+                "cardholder_name": tx.cardholder.name if tx.cardholder else None,
+                "card_number": tx.cardholder.card_number if tx.cardholder else None,
             }
             for tx in items
         ],
@@ -835,6 +861,7 @@ class TransactionUpdate(BaseModel):
     category: str | None  # None = clear category/subcategory
     subcategory: str | None  # None = clear subcategory
     notes: str | None  # None = clear notes
+    card_number: str | None = None  # None = clear cardholder
 
 
 @app.patch("/transactions/{transaction_id}")
@@ -873,6 +900,14 @@ async def update_transaction(
     else:
         tx.subcategory_id = None
 
+    # CardHolder
+    if body.card_number and body.card_number.strip():
+        chq = CardHolderQueries(db)
+        ch_id = await chq.find_or_create_for_enrichment(body.card_number.strip(), {})
+        tx.cardholder_id = ch_id
+    else:
+        tx.cardholder_id = None
+
     await db.commit()
     db.expire(tx)
     tx = await txq.get_by_id(transaction_id)
@@ -892,6 +927,8 @@ async def update_transaction(
         "notes": tx.notes,
         "is_recurring": tx.is_recurring,
         "raw_description": tx.raw_description,
+        "cardholder_name": tx.cardholder.name if tx.cardholder else None,
+        "card_number": tx.cardholder.card_number if tx.cardholder else None,
     }
 
 
@@ -930,9 +967,11 @@ async def re_enrich_transactions(
 
     mq = MerchantQueries(db)
     cq = CategoryQueries(db)
+    chq = CardHolderQueries(db)
     merchant_cache: dict[str, tuple[int, bool]] = {}
     category_cache: dict[str, int] = {}
     subcategory_cache: dict[tuple, int] = {}
+    cardholder_cache: dict[str, int] = {}
 
     for r in results:
         tx = eligible[r["index"]]
@@ -955,6 +994,14 @@ async def re_enrich_transactions(
             )
         else:
             tx.subcategory_id = None
+
+        cn = r.get("card_number")
+        if cn:
+            tx.cardholder_id = await chq.find_or_create_for_enrichment(
+                cn, cardholder_cache
+            )
+        else:
+            tx.cardholder_id = None
 
         if r.get("description"):
             tx.description = r["description"]
@@ -979,6 +1026,8 @@ async def re_enrich_transactions(
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
                 "raw_description": tx.raw_description,
+                "cardholder_name": tx.cardholder.name if tx.cardholder else None,
+                "card_number": tx.cardholder.card_number if tx.cardholder else None,
             }
             for tx in updated
         ]
@@ -1080,6 +1129,67 @@ async def merge_merchants(body: MerchantMerge, db: AsyncSession = Depends(get_db
         "name": winner.name,
         "location": winner.location,
         "transaction_count": transaction_count,
+    }
+
+
+@app.get("/cardholders")
+async def list_cardholders(
+    name: str | None = Query(None),
+    card_number: str | None = Query(None),
+    after: int | None = Query(None, description="Cursor: last seen cardholder ID"),
+    limit: int = Query(50, ge=1, le=500),
+    sort_by: Literal[
+        "name", "card_number", "transaction_count", "total_amount"
+    ] = Query("card_number"),
+    sort_dir: Literal["asc", "desc"] = Query("asc"),
+    db: AsyncSession = Depends(get_db),
+):
+    items, has_more, next_cursor = await CardHolderQueries(db).paginate(
+        name=name,
+        card_number=card_number,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        limit=limit,
+        after_id=after,
+    )
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "card_number": r.card_number,
+                "transaction_count": r.transaction_count,
+                "total_amount": str(r.total_amount),
+            }
+            for r in items
+        ],
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+    }
+
+
+class CardHolderUpdate(BaseModel):
+    name: str | None
+    card_number: str | None
+
+
+@app.patch("/cardholders/{cardholder_id}")
+async def update_cardholder(
+    cardholder_id: int, body: CardHolderUpdate, db: AsyncSession = Depends(get_db)
+):
+    chq = CardHolderQueries(db)
+    ch = await chq.get_by_id(cardholder_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="Card holder not found")
+    await chq.update(ch, body.name, body.card_number)
+    await db.commit()
+    row = await chq.get_with_stats(cardholder_id)
+    return {
+        "id": row.id,
+        "name": row.name,
+        "card_number": row.card_number,
+        "transaction_count": row.transaction_count,
+        "total_amount": str(row.total_amount),
     }
 
 

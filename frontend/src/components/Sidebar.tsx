@@ -5,6 +5,7 @@ const NAV = [
   { to: "/transactions", label: "Transactions", icon: "↕" },
   { to: "/accounts", label: "Accounts", icon: "🏦" },
   { to: "/merchants", label: "Merchants", icon: "🏪" },
+  { to: "/cardholders", label: "Card Holders", icon: "💳" },
   { to: "/categories", label: "Categories", icon: "🏷️" },
   { to: "/imports", label: "Imports", icon: "📋" },
   { to: "/recurring", label: "Recurring", icon: "🔁" },

@@ -27,6 +27,8 @@ const TX_1: Record<string, unknown> = {
   notes: null,
   is_recurring: false,
   raw_description: null,
+  cardholder_name: null,
+  card_number: null,
 };
 
 const TX_2: Record<string, unknown> = {
@@ -42,6 +44,8 @@ const TX_2: Record<string, unknown> = {
   notes: null,
   is_recurring: false,
   raw_description: null,
+  cardholder_name: null,
+  card_number: null,
 };
 
 const TRANSACTIONS_RESPONSE = {
@@ -415,5 +419,75 @@ describe("TransactionsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
     });
+  });
+
+  it("renders cardholder filter input in filter bar", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    // Card Holder filter is the only "e.g. 1234" placeholder when no modal is open
+    expect(screen.getByPlaceholderText("e.g. 1234")).toBeInTheDocument();
+  });
+
+  it("sends cardholder filter to API when applied", async () => {
+    const user = userEvent.setup();
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/transactions", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json(TRANSACTIONS_RESPONSE);
+      })
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    const input = screen.getByPlaceholderText("e.g. 1234");
+    await user.type(input, "1234");
+    capturedUrl = "";
+    await user.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() => {
+      expect(capturedUrl).not.toBe("");
+      expect(new URL(capturedUrl).searchParams.get("cardholder")).toBe("1234");
+    });
+  });
+
+  it("shows card number and cardholder name in detail modal", async () => {
+    const user = userEvent.setup();
+    const txWithCard = { ...TX_1, card_number: "9999", cardholder_name: "Alice" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithCard],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    // Click the row to open detail modal
+    await user.click(await screen.findByText("Coffee shop"));
+    await screen.findByRole("dialog");
+    expect(screen.getByText("9999")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+  });
+
+  it("shows card_number field in edit modal pre-populated", async () => {
+    const user = userEvent.setup();
+    const txWithCard = { ...TX_1, card_number: "9999", cardholder_name: "Alice" };
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [txWithCard],
+          has_more: false,
+          next_cursor: null,
+          total_count: 1,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Coffee shop");
+    await user.click(screen.getByRole("button", { name: /edit transaction/i }));
+    await screen.findByRole("dialog");
+    // The edit modal pre-fills card_number with the current value "9999"
+    expect(screen.getByDisplayValue("9999")).toBeInTheDocument();
   });
 });

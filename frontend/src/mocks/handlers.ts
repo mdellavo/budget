@@ -32,4 +32,7 @@ export const handlers = [
   ),
   http.get("/api/recurring", () => HttpResponse.json({ items: [] })),
   http.get("/api/monthly", () => HttpResponse.json({ months: [] })),
+  http.get("/api/cardholders", () =>
+    HttpResponse.json({ items: [], has_more: false, next_cursor: null })
+  ),
 ];
