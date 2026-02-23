@@ -470,6 +470,61 @@ describe("TransactionsPage", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
   });
 
+  it("shows cardholder suggestions when typing in Card Holder filter", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cardholders", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              card_number: "4567",
+              name: "Alice",
+              transaction_count: 5,
+              total_amount: "-100",
+            },
+            { id: 2, card_number: "8901", name: null, transaction_count: 2, total_amount: "-50" },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. 1234");
+    await user.type(input, "45");
+    await screen.findByText("4567");
+  });
+
+  it("selecting a cardholder suggestion sets the filter value", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cardholders", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              card_number: "4567",
+              name: "Alice",
+              transaction_count: 5,
+              total_amount: "-100",
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. 1234");
+    await user.type(input, "45");
+    await screen.findByText("4567");
+    await user.click(screen.getByText("4567"));
+    expect(input).toHaveValue("4567");
+  });
+
   it("shows card_number field in edit modal pre-populated", async () => {
     const user = userEvent.setup();
     const txWithCard = { ...TX_1, card_number: "9999", cardholder_name: "Alice" };

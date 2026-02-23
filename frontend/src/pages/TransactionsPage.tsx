@@ -4,12 +4,13 @@ import {
   listTransactions,
   listMerchants,
   listCategories,
+  listCardHolders,
   parseQuery,
   updateTransaction,
   reEnrichTransactions,
 } from "../api/client";
 import type { TransactionFilters, TransactionUpdateBody } from "../api/client";
-import type { CategoryItem, TransactionItem } from "../types";
+import type { CardHolderItem, CategoryItem, TransactionItem } from "../types";
 import ComboBox from "../components/ComboBox";
 
 type SortKey = "date" | "amount" | "description" | "merchant" | "category" | "account";
@@ -793,6 +794,9 @@ export default function TransactionsPage() {
   const [bulkReEnriching, setBulkReEnriching] = useState(false);
   const [bulkReEnrichError, setBulkReEnrichError] = useState<string | null>(null);
 
+  const [allCardholders, setAllCardholders] = useState<CardHolderItem[]>([]);
+  const [cardholderSuggestions, setCardholderSuggestions] = useState<string[]>([]);
+
   const fetchFirstPage = useCallback(
     async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
       setLoading(true);
@@ -824,6 +828,37 @@ export default function TransactionsPage() {
   useEffect(() => {
     fetchFirstPage(appliedFilters, sortBy, sortDir);
   }, [searchParams, fetchFirstPage]);
+
+  useEffect(() => {
+    listCardHolders({ limit: 100 })
+      .then((res) => setAllCardholders(res.items))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const query = filters.cardholder.trim().toLowerCase();
+    if (!query) {
+      setCardholderSuggestions([]);
+      return;
+    }
+    const seen = new Set<string>();
+    const suggestions: string[] = [];
+    for (const ch of allCardholders) {
+      if (
+        ch.card_number &&
+        ch.card_number.toLowerCase().includes(query) &&
+        !seen.has(ch.card_number)
+      ) {
+        suggestions.push(ch.card_number);
+        seen.add(ch.card_number);
+      }
+      if (ch.name && ch.name.toLowerCase().includes(query) && !seen.has(ch.name)) {
+        suggestions.push(ch.name);
+        seen.add(ch.name);
+      }
+    }
+    setCardholderSuggestions(suggestions.slice(0, 10));
+  }, [filters.cardholder, allCardholders]);
 
   function handleSort(key: SortKey) {
     const newDir = key === sortBy ? (sortDir === "asc" ? "desc" : "asc") : "desc";
@@ -1119,10 +1154,10 @@ export default function TransactionsPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Card Holder</label>
-            <input
-              type="text"
+            <ComboBox
               value={filters.cardholder}
-              onChange={(e) => setField("cardholder", e.target.value)}
+              onChange={(v) => setField("cardholder", v)}
+              suggestions={cardholderSuggestions}
               placeholder="e.g. 1234"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
