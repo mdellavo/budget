@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
 import TrendPage from "./TrendPage";
@@ -14,6 +14,16 @@ function renderPage() {
   return render(
     <MemoryRouter>
       <TrendPage />
+    </MemoryRouter>
+  );
+}
+
+function renderPageWithUrl(url: string) {
+  return render(
+    <MemoryRouter initialEntries={[url]}>
+      <Routes>
+        <Route path="/trends" element={<TrendPage />} />
+      </Routes>
     </MemoryRouter>
   );
 }
@@ -58,19 +68,38 @@ describe("TrendPage", () => {
     await screen.findByText(/API 500/);
   });
 
-  it("month inputs default to a 12-month range", () => {
+  it("month inputs default to a 5-year range", () => {
     renderPage();
     const fromInput = screen.getByLabelText(/month from/i) as HTMLInputElement;
     const toInput = screen.getByLabelText(/month to/i) as HTMLInputElement;
     // Both values should be non-empty YYYY-MM strings
     expect(fromInput.value).toMatch(/^\d{4}-\d{2}$/);
     expect(toInput.value).toMatch(/^\d{4}-\d{2}$/);
-    // date_from should be 11 months before date_to (at most 12 months earlier)
+    // date_from should be 60 months before date_to (5 years)
     const from = new Date(fromInput.value + "-01");
     const to = new Date(toInput.value + "-01");
     const monthDiff =
       (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
-    expect(monthDiff).toBe(11);
+    expect(monthDiff).toBe(60);
+  });
+
+  it("URL params pre-populate inputs and drive the initial fetch", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/category-trends", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ items: [] });
+      })
+    );
+    renderPageWithUrl("/trends?date_from=2020-01&date_to=2023-06");
+    const fromInput = screen.getByLabelText(/month from/i) as HTMLInputElement;
+    const toInput = screen.getByLabelText(/month to/i) as HTMLInputElement;
+    expect(fromInput.value).toBe("2020-01");
+    expect(toInput.value).toBe("2023-06");
+    await waitFor(() => {
+      expect(capturedUrl).toContain("date_from=2020-01");
+      expect(capturedUrl).toContain("date_to=2023-06");
+    });
   });
 
   it("changing month inputs and submitting calls API with updated params", async () => {

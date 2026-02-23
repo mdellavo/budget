@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { getCategoryTrends } from "../api/client";
-import type { CategoryTrendFilters } from "../api/client";
 import type { CategoryTrendItem } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
@@ -29,19 +29,20 @@ const PALETTE = [
 function defaultDateRange(): { date_from: string; date_to: string } {
   const now = new Date();
   const date_to = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const from = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  const from = new Date(now.getFullYear() - 5, now.getMonth(), 1);
   const date_from = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}`;
   return { date_from, date_to };
 }
 
 export default function TrendPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const defaults = defaultDateRange();
-  const [dateFrom, setDateFrom] = useState(defaults.date_from);
-  const [dateTo, setDateTo] = useState(defaults.date_to);
-  const [appliedFilters, setAppliedFilters] = useState<CategoryTrendFilters>({
-    date_from: defaults.date_from,
-    date_to: defaults.date_to,
-  });
+
+  const activeFrom = searchParams.get("date_from") ?? defaults.date_from;
+  const activeTo = searchParams.get("date_to") ?? defaults.date_to;
+
+  const [dateFrom, setDateFrom] = useState(activeFrom);
+  const [dateTo, setDateTo] = useState(activeTo);
   const [items, setItems] = useState<CategoryTrendItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +50,21 @@ export default function TrendPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDateFrom(activeFrom);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDateTo(activeTo);
+  }, [activeFrom, activeTo]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
-    getCategoryTrends(appliedFilters)
+    getCategoryTrends({ date_from: activeFrom, date_to: activeTo })
       .then((data) => setItems(data.items))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [appliedFilters]);
+  }, [activeFrom, activeTo]);
 
   const { traces, layout } = useMemo(() => {
     const months = Array.from(new Set(items.map((i) => i.month))).sort();
@@ -95,7 +103,7 @@ export default function TrendPage() {
 
   function handleApply(e: React.FormEvent) {
     e.preventDefault();
-    setAppliedFilters({ date_from: dateFrom, date_to: dateTo });
+    setSearchParams({ date_from: dateFrom, date_to: dateTo });
   }
 
   return (
