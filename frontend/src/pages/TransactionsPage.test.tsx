@@ -466,7 +466,7 @@ describe("TransactionsPage", () => {
     // Click the row to open detail modal
     await user.click(await screen.findByText("Coffee shop"));
     await screen.findByRole("dialog");
-    expect(screen.getByText("9999")).toBeInTheDocument();
+    expect(screen.getByText("ending in 9999")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
   });
 
@@ -494,7 +494,7 @@ describe("TransactionsPage", () => {
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
     const input = screen.getByPlaceholderText("e.g. 1234");
     await user.type(input, "45");
-    await screen.findByText("4567");
+    await screen.findByText("ending in 4567");
   });
 
   it("selecting a cardholder suggestion sets the filter value", async () => {
@@ -520,9 +520,250 @@ describe("TransactionsPage", () => {
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
     const input = screen.getByPlaceholderText("e.g. 1234");
     await user.type(input, "45");
-    await screen.findByText("4567");
-    await user.click(screen.getByText("4567"));
+    await screen.findByText("ending in 4567");
+    await user.click(screen.getByText("ending in 4567"));
     expect(input).toHaveValue("4567");
+  });
+
+  it("shows merchant suggestions when typing in Merchant filter", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/merchants", () =>
+        HttpResponse.json({
+          items: [{ id: 1, name: "Starbucks", transaction_count: 5, total_amount: "-50" }],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Starbucks");
+    await user.type(input, "Star");
+    await screen.findByText("Starbucks");
+  });
+
+  it("selecting a merchant suggestion sets the filter value", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/merchants", () =>
+        HttpResponse.json({
+          items: [{ id: 1, name: "Starbucks", transaction_count: 5, total_amount: "-50" }],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Starbucks");
+    await user.type(input, "Star");
+    await screen.findByText("Starbucks");
+    await user.click(screen.getByText("Starbucks"));
+    expect(input).toHaveValue("Starbucks");
+  });
+
+  it("applying merchant suggestion filter updates URL", async () => {
+    const user = userEvent.setup();
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/merchants", () =>
+        HttpResponse.json({
+          items: [{ id: 1, name: "Starbucks", transaction_count: 5, total_amount: "-50" }],
+          has_more: false,
+          next_cursor: null,
+        })
+      ),
+      http.get("/api/transactions", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ items: [], has_more: false, next_cursor: null, total_count: 0 });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Starbucks");
+    await user.type(input, "Star");
+    await screen.findByText("Starbucks");
+    await user.click(screen.getByText("Starbucks"));
+    capturedUrl = "";
+    await user.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() => {
+      expect(capturedUrl).not.toBe("");
+      expect(new URL(capturedUrl).searchParams.get("merchant")).toBe("Starbucks");
+    });
+  });
+
+  it("shows category suggestions when typing in Category filter", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/categories", () =>
+        HttpResponse.json({
+          items: [{ category: "Food & Drink", subcategory: "Coffee & Tea" }],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Food");
+    await user.type(input, "Food");
+    await screen.findByText("Food & Drink");
+  });
+
+  it("selecting a category suggestion sets the filter value", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/categories", () =>
+        HttpResponse.json({
+          items: [{ category: "Food & Drink", subcategory: "Coffee & Tea" }],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Food");
+    await user.type(input, "Food");
+    await screen.findByText("Food & Drink");
+    await user.click(screen.getByText("Food & Drink"));
+    expect(input).toHaveValue("Food & Drink");
+  });
+
+  it("shows subcategory suggestions when typing in Subcategory filter", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/categories", () =>
+        HttpResponse.json({
+          items: [{ category: "Food & Drink", subcategory: "Coffee & Tea" }],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Groceries");
+    await user.type(input, "Coffee");
+    await screen.findByText("Coffee & Tea");
+  });
+
+  it("scopes subcategory suggestions to selected category", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/categories", () =>
+        HttpResponse.json({
+          items: [
+            { category: "Food & Drink", subcategory: "Coffee & Tea" },
+            { category: "Shopping", subcategory: "Coffee Makers" },
+          ],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    // Set category filter to "Food & Drink"
+    const categoryInput = screen.getByPlaceholderText("e.g. Food");
+    await user.type(categoryInput, "Food & Drink");
+    // Now type in subcategory
+    const subcategoryInput = screen.getByPlaceholderText("e.g. Groceries");
+    await user.type(subcategoryInput, "Coffee");
+    // Only "Coffee & Tea" from "Food & Drink" should appear, not "Coffee Makers" from "Shopping"
+    await screen.findByText("Coffee & Tea");
+    expect(screen.queryByText("Coffee Makers")).not.toBeInTheDocument();
+  });
+
+  it("shows account suggestions when typing in Account filter", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/accounts", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              name: "Chase Checking",
+              institution: null,
+              account_type: null,
+              created_at: "2026-01-01",
+              transaction_count: 10,
+              total_amount: "-500",
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Checking");
+    await user.type(input, "Chase");
+    await screen.findByText("Chase Checking");
+  });
+
+  it("selecting an account suggestion sets the filter value", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/accounts", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              name: "Chase Checking",
+              institution: null,
+              account_type: null,
+              created_at: "2026-01-01",
+              transaction_count: 10,
+              total_amount: "-500",
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Checking");
+    await user.type(input, "Chase");
+    await screen.findByText("Chase Checking");
+    await user.click(screen.getByText("Chase Checking"));
+    expect(input).toHaveValue("Chase Checking");
+  });
+
+  it("applying account suggestion filter updates URL", async () => {
+    const user = userEvent.setup();
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/accounts", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              name: "Chase Checking",
+              institution: null,
+              account_type: null,
+              created_at: "2026-01-01",
+              transaction_count: 10,
+              total_amount: "-500",
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      ),
+      http.get("/api/transactions", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ items: [], has_more: false, next_cursor: null, total_count: 0 });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const input = screen.getByPlaceholderText("e.g. Checking");
+    await user.type(input, "Chase");
+    await screen.findByText("Chase Checking");
+    await user.click(screen.getByText("Chase Checking"));
+    capturedUrl = "";
+    await user.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() => {
+      expect(capturedUrl).not.toBe("");
+      expect(new URL(capturedUrl).searchParams.get("account")).toBe("Chase Checking");
+    });
   });
 
   it("shows card_number field in edit modal pre-populated", async () => {

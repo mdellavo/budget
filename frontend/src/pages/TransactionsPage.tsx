@@ -5,6 +5,7 @@ import {
   listMerchants,
   listCategories,
   listCardHolders,
+  listAccounts,
   parseQuery,
   updateTransaction,
   reEnrichTransactions,
@@ -490,7 +491,7 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
           <Row label="Notes">{tx.notes ?? <span className="text-gray-400">—</span>}</Row>
           {(tx.cardholder_name || tx.card_number) && (
             <Row label="Card">
-              {tx.card_number && <span className="font-mono">{tx.card_number}</span>}
+              {tx.card_number && <span className="font-mono">ending in {tx.card_number}</span>}
               {tx.cardholder_name && (
                 <span className="ml-2 text-gray-500">{tx.cardholder_name}</span>
               )}
@@ -797,6 +798,32 @@ export default function TransactionsPage() {
   const [allCardholders, setAllCardholders] = useState<CardHolderItem[]>([]);
   const [cardholderSuggestions, setCardholderSuggestions] = useState<string[]>([]);
 
+  const [allCategoryItems, setAllCategoryItems] = useState<CategoryItem[]>([]);
+  const [allAccountNames, setAllAccountNames] = useState<string[]>([]);
+  const [merchantFilterSuggestions, setMerchantFilterSuggestions] = useState<string[]>([]);
+  const [accountFilterSuggestions, setAccountFilterSuggestions] = useState<string[]>([]);
+
+  const categoryFilterSuggestions = (() => {
+    const q = filters.category.trim().toLowerCase();
+    if (!q) return [];
+    return Array.from(
+      new Set(allCategoryItems.map((r) => r.category).filter((c) => c.toLowerCase().includes(q)))
+    ).slice(0, 10);
+  })();
+
+  const subcategoryFilterSuggestions = (() => {
+    const q = filters.subcategory.trim().toLowerCase();
+    if (!q) return [];
+    return Array.from(
+      new Set(
+        allCategoryItems
+          .filter((r) => !filters.category.trim() || r.category === filters.category.trim())
+          .map((r) => r.subcategory)
+          .filter((s) => s.toLowerCase().includes(q))
+      )
+    ).slice(0, 10);
+  })();
+
   const fetchFirstPage = useCallback(
     async (formFilters: FormFilters, sb: SortKey, sd: "asc" | "desc") => {
       setLoading(true);
@@ -836,6 +863,18 @@ export default function TransactionsPage() {
   }, []);
 
   useEffect(() => {
+    listCategories()
+      .then((r) => setAllCategoryItems(r.items))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    listAccounts({ limit: 500 })
+      .then((r) => setAllAccountNames(r.items.map((a) => a.name)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const query = filters.cardholder.trim().toLowerCase();
     if (!query) {
       setCardholderSuggestions([]);
@@ -859,6 +898,38 @@ export default function TransactionsPage() {
     }
     setCardholderSuggestions(suggestions.slice(0, 10));
   }, [filters.cardholder, allCardholders]);
+
+  const merchantFilterDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (merchantFilterDebounce.current) clearTimeout(merchantFilterDebounce.current);
+    const query = filters.merchant.trim();
+    if (!query) {
+      setMerchantFilterSuggestions([]);
+      return;
+    }
+    merchantFilterDebounce.current = setTimeout(async () => {
+      try {
+        const res = await listMerchants({ name: query, limit: 10 });
+        setMerchantFilterSuggestions(res.items.map((m) => m.name));
+      } catch {
+        setMerchantFilterSuggestions([]);
+      }
+    }, 300);
+    return () => {
+      if (merchantFilterDebounce.current) clearTimeout(merchantFilterDebounce.current);
+    };
+  }, [filters.merchant]);
+
+  useEffect(() => {
+    const q = filters.account.trim().toLowerCase();
+    if (!q) {
+      setAccountFilterSuggestions([]);
+      return;
+    }
+    setAccountFilterSuggestions(
+      allAccountNames.filter((n) => n.toLowerCase().includes(q)).slice(0, 10)
+    );
+  }, [filters.account, allAccountNames]);
 
   function handleSort(key: SortKey) {
     const newDir = key === sortBy ? (sortDir === "asc" ? "desc" : "asc") : "desc";
@@ -1104,10 +1175,10 @@ export default function TransactionsPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Merchant</label>
-            <input
-              type="text"
+            <ComboBox
               value={filters.merchant}
-              onChange={(e) => setField("merchant", e.target.value)}
+              onChange={(v) => setField("merchant", v)}
+              suggestions={merchantFilterSuggestions}
               placeholder="e.g. Starbucks"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
@@ -1124,30 +1195,30 @@ export default function TransactionsPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Category</label>
-            <input
-              type="text"
+            <ComboBox
               value={filters.category}
-              onChange={(e) => setField("category", e.target.value)}
+              onChange={(v) => setField("category", v)}
+              suggestions={categoryFilterSuggestions}
               placeholder="e.g. Food"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Subcategory</label>
-            <input
-              type="text"
+            <ComboBox
               value={filters.subcategory}
-              onChange={(e) => setField("subcategory", e.target.value)}
+              onChange={(v) => setField("subcategory", v)}
+              suggestions={subcategoryFilterSuggestions}
               placeholder="e.g. Groceries"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Account</label>
-            <input
-              type="text"
+            <ComboBox
               value={filters.account}
-              onChange={(e) => setField("account", e.target.value)}
+              onChange={(v) => setField("account", v)}
+              suggestions={accountFilterSuggestions}
               placeholder="e.g. Checking"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
@@ -1158,6 +1229,7 @@ export default function TransactionsPage() {
               value={filters.cardholder}
               onChange={(v) => setField("cardholder", v)}
               suggestions={cardholderSuggestions}
+              displayValue={(s) => (/^\d+$/.test(s) ? `ending in ${s}` : s)}
               placeholder="e.g. 1234"
               className="border border-gray-300 rounded px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />

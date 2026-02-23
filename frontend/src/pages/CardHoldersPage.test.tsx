@@ -43,7 +43,7 @@ describe("CardHoldersPage", () => {
       )
     );
     renderPage();
-    expect(await screen.findByText("1234")).toBeInTheDocument();
+    expect(await screen.findByText("ending in 1234")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("10")).toBeInTheDocument();
     expect(screen.getByText("-$150.00")).toBeInTheDocument();
@@ -76,10 +76,10 @@ describe("CardHoldersPage", () => {
       })
     );
     renderPage();
-    await screen.findByText("1234");
+    await screen.findByText("ending in 1234");
     await user.click(screen.getByRole("button", { name: /load more/i }));
-    await screen.findByText("5678");
-    expect(screen.getByText("1234")).toBeInTheDocument();
+    await screen.findByText("ending in 5678");
+    expect(screen.getByText("ending in 1234")).toBeInTheDocument();
   });
 
   it("opens details modal when card number button is clicked", async () => {
@@ -90,7 +90,7 @@ describe("CardHoldersPage", () => {
       )
     );
     renderPage();
-    await user.click(await screen.findByRole("button", { name: "1234" }));
+    await user.click(await screen.findByRole("button", { name: "ending in 1234" }));
     expect(screen.getByText("View transactions →")).toBeInTheDocument();
   });
 
@@ -102,7 +102,7 @@ describe("CardHoldersPage", () => {
       )
     );
     renderPage();
-    await user.click(await screen.findByRole("button", { name: "1234" }));
+    await user.click(await screen.findByRole("button", { name: "ending in 1234" }));
     const link = screen.getByRole("link", { name: /View transactions/i });
     expect(link.getAttribute("href")).toContain("cardholder=1234");
   });
@@ -115,7 +115,7 @@ describe("CardHoldersPage", () => {
       )
     );
     renderPage();
-    await screen.findByText("1234");
+    await screen.findByText("ending in 1234");
     await user.click(screen.getByTitle("Edit card holder"));
     expect(screen.getByText("Edit card holder")).toBeInTheDocument();
     expect(screen.getByDisplayValue("1234")).toBeInTheDocument();
@@ -134,7 +134,7 @@ describe("CardHoldersPage", () => {
       })
     );
     renderPage();
-    await screen.findByText("1234");
+    await screen.findByText("ending in 1234");
     await user.click(screen.getByTitle("Edit card holder"));
     const nameInput = screen.getByDisplayValue("Alice");
     await user.clear(nameInput);

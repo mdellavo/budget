@@ -4,6 +4,7 @@ interface ComboBoxProps {
   value: string;
   onChange: (value: string) => void;
   suggestions: string[];
+  displayValue?: (s: string) => string;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -13,6 +14,7 @@ export default function ComboBox({
   value,
   onChange,
   suggestions,
+  displayValue,
   placeholder,
   disabled,
   className,
@@ -69,7 +71,7 @@ export default function ComboBox({
               onMouseDown={() => handleSelect(s)}
               className="px-3 py-2 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 text-gray-800"
             >
-              {s}
+              {displayValue ? displayValue(s) : s}
             </li>
           ))}
         </ul>
