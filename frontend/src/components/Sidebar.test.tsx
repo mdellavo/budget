@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { http, HttpResponse } from "msw";
+import { server } from "../mocks/server";
 import Sidebar from "./Sidebar";
 
 // Wrap in MemoryRouter because Sidebar uses NavLink from react-router-dom.
@@ -55,5 +57,35 @@ describe("Sidebar", () => {
   it("does not apply the active style to non-current route links", () => {
     renderSidebar("/overview");
     expect(screen.getByRole("link", { name: /transactions/i })).not.toHaveClass("bg-indigo-600");
+  });
+
+  it("shows no spinner when no imports are in-progress", async () => {
+    renderSidebar();
+    await waitFor(() => expect(document.querySelector(".animate-spin")).not.toBeInTheDocument());
+  });
+
+  it("shows spinner next to Imports when an import is in-progress", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              filename: "bank.csv",
+              account: "Checking",
+              status: "in-progress",
+              imported_at: "2026-02-22",
+              row_count: 100,
+              enriched_rows: 10,
+              transaction_count: 0,
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderSidebar();
+    await waitFor(() => expect(document.querySelector(".animate-spin")).toBeInTheDocument());
   });
 });

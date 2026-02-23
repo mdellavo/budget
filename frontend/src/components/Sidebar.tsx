@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { listImports } from "../api/client";
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: "📊" },
@@ -13,6 +15,22 @@ const NAV = [
 ];
 
 export default function Sidebar() {
+  const [hasInProgress, setHasInProgress] = useState(false);
+
+  useEffect(() => {
+    async function check() {
+      try {
+        const data = await listImports({ limit: 20, sort_by: "imported_at", sort_dir: "desc" });
+        setHasInProgress(data.items.some((i) => i.status === "in-progress"));
+      } catch {
+        // ignore transient errors
+      }
+    }
+    check();
+    const id = setInterval(check, 3000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <aside className="w-56 shrink-0 bg-gray-900 text-gray-100 flex flex-col h-screen sticky top-0">
       <div className="px-6 py-5 border-b border-gray-700">
@@ -32,6 +50,9 @@ export default function Sidebar() {
           >
             <span>{icon}</span>
             {label}
+            {to === "/imports" && hasInProgress && (
+              <span className="ml-auto h-3 w-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+            )}
           </NavLink>
         ))}
       </nav>
