@@ -1,5 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
 import Sidebar from "./components/Sidebar";
+import LoginPage from "./pages/LoginPage";
 import OverviewPage from "./pages/OverviewPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import AccountsPage from "./pages/AccountsPage";
@@ -15,25 +18,37 @@ import TrendPage from "./pages/TrendPage";
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto">
-          <Routes>
-            <Route path="/" element={<Navigate to="/overview" replace />} />
-            <Route path="/overview" element={<OverviewPage />} />
-            <Route path="/transactions" element={<TransactionsPage />} />
-            <Route path="/accounts" element={<AccountsPage />} />
-            <Route path="/merchants" element={<MerchantsPage />} />
-            <Route path="/merchants/merge" element={<MerchantMergePage />} />
-            <Route path="/imports" element={<ImportsPage />} />
-            <Route path="/recurring" element={<RecurringPage />} />
-            <Route path="/monthly" element={<MonthlyPage />} />
-            <Route path="/categories" element={<CategoriesPage />} />
-            <Route path="/cardholders" element={<CardHoldersPage />} />
-            <Route path="/trends" element={<TrendPage />} />
-          </Routes>
-        </main>
-      </div>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <div className="flex min-h-screen bg-gray-50">
+                  <Sidebar />
+                  <main className="flex-1 overflow-y-auto">
+                    <Routes>
+                      <Route path="/" element={<Navigate to="/overview" replace />} />
+                      <Route path="/overview" element={<OverviewPage />} />
+                      <Route path="/transactions" element={<TransactionsPage />} />
+                      <Route path="/accounts" element={<AccountsPage />} />
+                      <Route path="/merchants" element={<MerchantsPage />} />
+                      <Route path="/merchants/merge" element={<MerchantMergePage />} />
+                      <Route path="/imports" element={<ImportsPage />} />
+                      <Route path="/recurring" element={<RecurringPage />} />
+                      <Route path="/monthly" element={<MonthlyPage />} />
+                      <Route path="/categories" element={<CategoriesPage />} />
+                      <Route path="/cardholders" element={<CardHoldersPage />} />
+                      <Route path="/trends" element={<TrendPage />} />
+                    </Routes>
+                  </main>
+                </div>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

@@ -21,53 +21,61 @@ from .models import (
 
 
 class AnalyticsQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
+
+    def _user_filter(self):
+        if self.user_id is not None:
+            return [Transaction.user_id == self.user_id]
+        return []
 
     async def get_recurring_transactions(self) -> list:
-        rows = (
-            await self.db.execute(
-                select(
-                    Transaction.date,
-                    Transaction.amount,
-                    Transaction.merchant_id,
-                    Transaction.description,
-                    Merchant.name.label("merchant_name"),
-                    Category.name.label("category_name"),
-                )
-                .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
-                .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
-                .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(Transaction.is_recurring == True)  # noqa: E712
-                .order_by(Transaction.date)
+        stmt = (
+            select(
+                Transaction.date,
+                Transaction.amount,
+                Transaction.merchant_id,
+                Transaction.description,
+                Merchant.name.label("merchant_name"),
+                Category.name.label("category_name"),
             )
-        ).all()
+            .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .outerjoin(Category, Subcategory.category_id == Category.id)
+            .where(Transaction.is_recurring == True, *self._user_filter())  # noqa: E712
+            .order_by(Transaction.date)
+        )
+        rows = (await self.db.execute(stmt)).all()
         return rows
 
     async def list_months(self) -> list[str]:
-        rows = (
-            await self.db.execute(
-                select(func.strftime("%Y-%m", Transaction.date).label("month"))
-                .group_by(func.strftime("%Y-%m", Transaction.date))
-                .order_by(text("month DESC"))
-            )
-        ).all()
+        stmt = (
+            select(func.strftime("%Y-%m", Transaction.date).label("month"))
+            .where(*self._user_filter())
+            .group_by(func.strftime("%Y-%m", Transaction.date))
+            .order_by(text("month DESC"))
+        )
+        rows = (await self.db.execute(stmt)).all()
         return [r.month for r in rows]
 
     async def get_month_stats(self, month: str) -> dict:
         month_filter = func.strftime("%Y-%m", Transaction.date) == month
+        user_filters = self._user_filter()
         transaction_count = (
-            await self.db.scalar(select(func.count(Transaction.id)).where(month_filter))
+            await self.db.scalar(
+                select(func.count(Transaction.id)).where(month_filter, *user_filters)
+            )
             or 0
         )
         income = await self.db.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                month_filter, Transaction.amount > 0
+                month_filter, Transaction.amount > 0, *user_filters
             )
         ) or Decimal(0)
         expenses = await self.db.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                month_filter, Transaction.amount < 0
+                month_filter, Transaction.amount < 0, *user_filters
             )
         ) or Decimal(0)
         return {
@@ -90,7 +98,7 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(month_filter, Transaction.amount < 0)
+                .where(month_filter, Transaction.amount < 0, *self._user_filter())
                 .group_by(Category.name, Subcategory.name)
                 .order_by(func.sum(Transaction.amount).asc())
             )
@@ -112,7 +120,7 @@ class AnalyticsQueries:
             .select_from(Transaction)
             .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
             .outerjoin(Category, Subcategory.category_id == Category.id)
-            .where(Transaction.amount < 0)
+            .where(Transaction.amount < 0, *self._user_filter())
             .group_by(month_col, Category.name)
             .order_by(month_col, Category.name)
         )
@@ -123,15 +131,19 @@ class AnalyticsQueries:
         return (await self.db.execute(stmt)).all()
 
     async def get_overview_summary(self) -> dict:
+        user_filters = self._user_filter()
         transaction_count = (
-            await self.db.scalar(select(func.count(Transaction.id))) or 0
+            await self.db.scalar(
+                select(func.count(Transaction.id)).where(*user_filters)
+            )
+            or 0
         )
         net = await self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0))
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(*user_filters)
         ) or Decimal(0)
         income = await self.db.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                Transaction.amount > 0
+                Transaction.amount > 0, *user_filters
             )
         ) or Decimal(0)
         expenses = net - income
@@ -151,7 +163,7 @@ class AnalyticsQueries:
                 )
                 .select_from(Transaction)
                 .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
-                .where(Transaction.amount > 0)
+                .where(Transaction.amount > 0, *self._user_filter())
                 .group_by(Merchant.name)
                 .order_by(func.sum(Transaction.amount).desc())
             )
@@ -168,7 +180,7 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(Transaction.amount < 0)
+                .where(Transaction.amount < 0, *self._user_filter())
                 .group_by(Category.name)
                 .order_by(func.sum(Transaction.amount))
             )
@@ -177,8 +189,9 @@ class AnalyticsQueries:
 
 
 class CategoryQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def list_with_stats(
         self,
@@ -190,6 +203,8 @@ class CategoryQueries:
         sort_dir: str,
     ) -> list:
         conditions = []
+        if self.user_id is not None:
+            conditions.append(Transaction.user_id == self.user_id)
         if date_from:
             conditions.append(Transaction.date >= date_from)
         if date_to:
@@ -245,9 +260,13 @@ class CategoryQueries:
         self, name: str, cache: dict[str, int]
     ) -> int:
         if name not in cache:
-            res = await self.db.execute(select(Category).where(Category.name == name))
-            c = res.scalar_one_or_none() or Category(name=name)
-            if c.id is None:
+            stmt = select(Category).where(Category.name == name)
+            if self.user_id is not None:
+                stmt = stmt.where(Category.user_id == self.user_id)
+            res = await self.db.execute(stmt)
+            c = res.scalar_one_or_none()
+            if c is None:
+                c = Category(name=name, user_id=self.user_id)
                 self.db.add(c)
                 await self.db.flush()
             cache[name] = c.id
@@ -275,8 +294,9 @@ class CategoryQueries:
 
 
 class CardHolderQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def get_by_id(self, cardholder_id: int) -> CardHolder | None:
         return await self.db.get(CardHolder, cardholder_id)
@@ -286,15 +306,14 @@ class CardHolderQueries:
     ) -> int:
         if card_number in cache:
             return cache[card_number]
-        existing = (
-            await self.db.execute(
-                select(CardHolder).where(CardHolder.card_number == card_number)
-            )
-        ).scalar_one_or_none()
+        stmt = select(CardHolder).where(CardHolder.card_number == card_number)
+        if self.user_id is not None:
+            stmt = stmt.where(CardHolder.user_id == self.user_id)
+        existing = (await self.db.execute(stmt)).scalar_one_or_none()
         if existing:
             cache[card_number] = existing.id
             return existing.id
-        ch = CardHolder(card_number=card_number)
+        ch = CardHolder(card_number=card_number, user_id=self.user_id)
         self.db.add(ch)
         await self.db.flush()
         cache[card_number] = ch.id
@@ -366,6 +385,8 @@ class CardHolderQueries:
             order_clauses = [sort_expr.asc().nulls_last(), CardHolder.id.asc()]
 
         conditions = []
+        if self.user_id is not None:
+            conditions.append(CardHolder.user_id == self.user_id)
         if name:
             conditions.append(CardHolder.name.ilike(f"%{name}%"))
         if card_number:
@@ -426,8 +447,9 @@ class CardHolderQueries:
 
 
 class AccountQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def get_by_id(self, account_id: int) -> Account | None:
         return await self.db.get(Account, account_id)
@@ -449,13 +471,16 @@ class AccountQueries:
         return count, total
 
     async def find_by_name(self, name: str) -> Account | None:
-        result = await self.db.execute(select(Account).where(Account.name == name))
+        stmt = select(Account).where(Account.name == name)
+        if self.user_id is not None:
+            stmt = stmt.where(Account.user_id == self.user_id)
+        result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def find_or_create(self, name: str) -> Account:
         account = await self.find_by_name(name)
         if account is None:
-            account = Account(name=name)
+            account = Account(name=name, user_id=self.user_id)
             self.db.add(account)
             await self.db.flush()
         return account
@@ -497,6 +522,8 @@ class AccountQueries:
             order_clauses = [sort_expr.asc().nulls_last(), Account.id.asc()]
 
         conditions = []
+        if self.user_id is not None:
+            conditions.append(Account.user_id == self.user_id)
         if name:
             conditions.append(Account.name.ilike(f"%{name}%"))
         if institution:
@@ -561,16 +588,18 @@ class AccountQueries:
 
 
 class CsvImportQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def get_by_id(self, import_id: int) -> CsvImport | None:
         return await self.db.get(CsvImport, import_id)
 
     async def find_by_filename(self, filename: str) -> CsvImport | None:
-        result = await self.db.execute(
-            select(CsvImport).where(CsvImport.filename == filename)
-        )
+        stmt = select(CsvImport).where(CsvImport.filename == filename)
+        if self.user_id is not None:
+            stmt = stmt.where(CsvImport.user_id == self.user_id)
+        result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def list(
@@ -608,6 +637,8 @@ class CsvImportQueries:
             order_clauses = [sort_expr.asc().nulls_last(), CsvImport.id.asc()]
 
         conditions = []
+        if self.user_id is not None:
+            conditions.append(CsvImport.user_id == self.user_id)
         if filename:
             conditions.append(CsvImport.filename.ilike(f"%{filename}%"))
         if account:
@@ -693,6 +724,7 @@ class CsvImportQueries:
                 row_count=row_count,
                 column_mapping=json.dumps(column_mapping),
                 status="in-progress",
+                user_id=self.user_id,
             )
             self.db.add(csv_import)
         await self.db.flush()
@@ -725,8 +757,9 @@ class CsvImportQueries:
 
 
 class MerchantQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def get_by_id(self, merchant_id: int) -> Merchant | None:
         return await self.db.get(Merchant, merchant_id)
@@ -780,6 +813,8 @@ class MerchantQueries:
             order_clauses = [sort_expr.asc().nulls_last(), Merchant.id.asc()]
 
         conditions = []
+        if self.user_id is not None:
+            conditions.append(Merchant.user_id == self.user_id)
         if name:
             conditions.append(Merchant.name.ilike(f"%{name}%"))
         if location:
@@ -849,6 +884,9 @@ class MerchantQueries:
             .correlate(Merchant)
             .scalar_subquery()
         )
+        conditions = []
+        if self.user_id is not None:
+            conditions.append(Merchant.user_id == self.user_id)
         rows = (
             await self.db.execute(
                 select(
@@ -856,7 +894,9 @@ class MerchantQueries:
                     Merchant.name,
                     Merchant.location,
                     txn_count_expr.label("transaction_count"),
-                ).order_by(Merchant.id)
+                )
+                .where(*conditions)
+                .order_by(Merchant.id)
             )
         ).all()
         return rows
@@ -893,10 +933,13 @@ class MerchantQueries:
         cache: dict[str, tuple[int, bool]],
     ) -> int:
         if name not in cache:
-            res = await self.db.execute(select(Merchant).where(Merchant.name == name))
+            stmt = select(Merchant).where(Merchant.name == name)
+            if self.user_id is not None:
+                stmt = stmt.where(Merchant.user_id == self.user_id)
+            res = await self.db.execute(stmt)
             m = res.scalar_one_or_none()
             if m is None:
-                m = Merchant(name=name, location=location)
+                m = Merchant(name=name, location=location, user_id=self.user_id)
                 self.db.add(m)
                 await self.db.flush()
                 cache[name] = (m.id, location is not None)
@@ -919,8 +962,9 @@ class MerchantQueries:
 
 
 class TransactionQueries:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
     def build_conditions(
         self,
@@ -940,6 +984,8 @@ class TransactionQueries:
         cardholder=None,
     ) -> list:
         conditions = []
+        if self.user_id is not None:
+            conditions.append(Transaction.user_id == self.user_id)
         if date_from:
             conditions.append(Transaction.date >= date_from)
         if date_to:
@@ -1113,21 +1159,23 @@ class TransactionQueries:
         return list(result.scalars().all())
 
     async def find_or_create_merchant(self, name: str) -> Merchant:
-        merchant = (
-            await self.db.execute(select(Merchant).where(Merchant.name.ilike(name)))
-        ).scalar_one_or_none()
+        stmt = select(Merchant).where(Merchant.name.ilike(name))
+        if self.user_id is not None:
+            stmt = stmt.where(Merchant.user_id == self.user_id)
+        merchant = (await self.db.execute(stmt)).scalar_one_or_none()
         if merchant is None:
-            merchant = Merchant(name=name)
+            merchant = Merchant(name=name, user_id=self.user_id)
             self.db.add(merchant)
             await self.db.flush()
         return merchant
 
     async def find_or_create_category(self, name: str) -> Category:
-        category = (
-            await self.db.execute(select(Category).where(Category.name.ilike(name)))
-        ).scalar_one_or_none()
+        stmt = select(Category).where(Category.name.ilike(name))
+        if self.user_id is not None:
+            stmt = stmt.where(Category.user_id == self.user_id)
+        category = (await self.db.execute(stmt)).scalar_one_or_none()
         if category is None:
-            category = Category(name=name)
+            category = Category(name=name, user_id=self.user_id)
             self.db.add(category)
             await self.db.flush()
         return category

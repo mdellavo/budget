@@ -23,15 +23,37 @@ transaction_tags = Table(
 )
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    password_hash: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    accounts: Mapped[list["Account"]] = relationship(back_populates="user")
+    csv_imports: Mapped[list["CsvImport"]] = relationship(back_populates="user")
+    categories: Mapped[list["Category"]] = relationship(back_populates="user")
+    merchants: Mapped[list["Merchant"]] = relationship(back_populates="user")
+    cardholders: Mapped[list["CardHolder"]] = relationship(back_populates="user")
+    tags: Mapped[list["Tag"]] = relationship(back_populates="user")
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+
+
 class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(200))
     institution: Mapped[str | None] = mapped_column(String(200))
     account_type: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    user: Mapped["User"] = relationship(back_populates="accounts")
     csv_imports: Mapped[list["CsvImport"]] = relationship(back_populates="account")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
 
@@ -40,6 +62,7 @@ class CsvImport(Base):
     __tablename__ = "csv_imports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     filename: Mapped[str] = mapped_column(String(500))
     imported_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -50,6 +73,7 @@ class CsvImport(Base):
     )
     column_mapping: Mapped[str | None] = mapped_column(String(1000))
 
+    user: Mapped["User"] = relationship(back_populates="csv_imports")
     account: Mapped[Account] = relationship(back_populates="csv_imports")
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="csv_import"
@@ -60,8 +84,12 @@ class Category(Base):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(200))
 
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    user: Mapped["User"] = relationship(back_populates="categories")
     subcategories: Mapped[list["Subcategory"]] = relationship(back_populates="category")
 
 
@@ -84,9 +112,13 @@ class Merchant(Base):
     __tablename__ = "merchants"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(200))
     location: Mapped[str | None] = mapped_column(String(200))
 
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    user: Mapped["User"] = relationship(back_populates="merchants")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="merchant")
 
 
@@ -94,9 +126,13 @@ class CardHolder(Base):
     __tablename__ = "cardholders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     name: Mapped[str | None] = mapped_column(String(200))
-    card_number: Mapped[str | None] = mapped_column(String(20), unique=True)
+    card_number: Mapped[str | None] = mapped_column(String(20))
 
+    __table_args__ = (UniqueConstraint("user_id", "card_number"),)
+
+    user: Mapped["User"] = relationship(back_populates="cardholders")
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="cardholder"
     )
@@ -106,8 +142,12 @@ class Tag(Base):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(200))
 
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    user: Mapped["User"] = relationship(back_populates="tags")
     transactions: Mapped[list["Transaction"]] = relationship(
         secondary=transaction_tags, back_populates="tags"
     )
@@ -117,6 +157,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     csv_import_id: Mapped[int | None] = mapped_column(ForeignKey("csv_imports.id"))
     date: Mapped[date] = mapped_column(Date)
@@ -132,6 +173,7 @@ class Transaction(Base):
     )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
+    user: Mapped["User"] = relationship(back_populates="transactions")
     account: Mapped[Account] = relationship(back_populates="transactions")
     csv_import: Mapped[CsvImport | None] = relationship(back_populates="transactions")
     merchant: Mapped["Merchant | None"] = relationship(back_populates="transactions")

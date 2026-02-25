@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { listImports } from "../api/client";
+import { useAuth } from "../contexts/AuthContext";
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: "📊" },
@@ -16,6 +17,7 @@ const NAV = [
 ];
 
 export default function Sidebar() {
+  const { user, logout } = useAuth();
   const [hasInProgress, setHasInProgress] = useState(false);
 
   useEffect(() => {
@@ -57,6 +59,14 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      {user && (
+        <div className="px-4 py-3 border-t border-gray-700 text-sm">
+          <div className="text-gray-300 truncate">{user.name}</div>
+          <button onClick={logout} className="text-gray-500 hover:text-white text-xs mt-1">
+            Sign out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

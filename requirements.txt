@@ -4,3 +4,5 @@ uvicorn
 anthropic
 sqlalchemy
 aiosqlite
+python-jose[cryptography]
+bcrypt

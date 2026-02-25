@@ -224,6 +224,7 @@ class TestImports:
     async def _make_csv_import(self, db_session, make_account):
         acct = await make_account("Import Account")
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="test.csv",
             row_count=10,
@@ -257,6 +258,7 @@ class TestImports:
     ):
         acct = await make_account("Import Account 2")
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="done.csv",
             row_count=5,
@@ -276,6 +278,7 @@ class TestImports:
     async def test_list_filename_filter(self, client, db_session, make_account):
         acct = await make_account()
         ci1 = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="january.csv",
             row_count=10,
@@ -283,6 +286,7 @@ class TestImports:
             status="complete",
         )
         ci2 = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="february.csv",
             row_count=5,
@@ -511,6 +515,7 @@ class TestTransactions:
     ):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="import.csv",
             row_count=1,
@@ -1101,10 +1106,11 @@ class TestRunEnrichment:
         )
 
         async with factory() as session:
-            acct = Account(name="Test Account")
+            acct = Account(name="Test Account", user_id=1)
             session.add(acct)
             await session.flush()
             ci = CsvImport(
+                user_id=1,
                 account_id=acct.id,
                 filename="test.csv",
                 row_count=1,
@@ -1138,6 +1144,7 @@ class TestRunEnrichment:
             desc_col="Description",
             account_id=account_id,
             csv_import_id=ci_id,
+            user_id=1,
         )
 
         async with factory() as session:
@@ -1173,10 +1180,11 @@ class TestRunEnrichment:
         )
 
         async with factory() as session:
-            acct = Account(name="No Desc Account")
+            acct = Account(name="No Desc Account", user_id=1)
             session.add(acct)
             await session.flush()
             ci = CsvImport(
+                user_id=1,
                 account_id=acct.id,
                 filename="nodesc.csv",
                 row_count=1,
@@ -1199,6 +1207,7 @@ class TestRunEnrichment:
             desc_col=None,
             account_id=account_id,
             csv_import_id=ci_id,
+            user_id=1,
         )
 
         async with factory() as session:
@@ -1273,6 +1282,7 @@ class TestReEnrichImport:
     async def test_already_in_progress(self, client, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="x.csv",
             row_count=5,
@@ -1287,6 +1297,7 @@ class TestReEnrichImport:
     async def test_success(self, client, db_session, make_account, mocker):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="z.csv",
             row_count=1,
@@ -1313,6 +1324,7 @@ class TestAbortImport:
     async def test_cannot_abort_complete(self, client, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="done.csv",
             row_count=5,
@@ -1327,6 +1339,7 @@ class TestAbortImport:
     async def test_cannot_abort_already_aborted(self, client, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="stopped.csv",
             row_count=5,
@@ -1341,6 +1354,7 @@ class TestAbortImport:
     async def test_success(self, client, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="running.csv",
             row_count=10,
@@ -1360,6 +1374,7 @@ class TestAbortImport:
     async def test_progress_has_aborted_field(self, client, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="aborted.csv",
             row_count=10,
@@ -1379,6 +1394,7 @@ class TestAbortImport:
     ):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="retry.csv",
             row_count=5,

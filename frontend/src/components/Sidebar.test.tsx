@@ -3,13 +3,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
+import { AuthProvider } from "../contexts/AuthContext";
 import Sidebar from "./Sidebar";
 
-// Wrap in MemoryRouter because Sidebar uses NavLink from react-router-dom.
+// Wrap in MemoryRouter (for NavLink) and AuthProvider (for useAuth in Sidebar).
 function renderSidebar(initialPath = "/") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <Sidebar />
+      <AuthProvider>
+        <Sidebar />
+      </AuthProvider>
     </MemoryRouter>
   );
 }

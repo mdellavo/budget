@@ -24,14 +24,14 @@ from budget.query import (
 
 class TestAccountQueries:
     async def test_find_or_create_new(self, db_session):
-        aq = AccountQueries(db_session)
+        aq = AccountQueries(db_session, user_id=1)
         acct = await aq.find_or_create("Checking")
         await db_session.commit()
         assert acct.id is not None
         assert acct.name == "Checking"
 
     async def test_find_or_create_no_duplicate(self, db_session):
-        aq = AccountQueries(db_session)
+        aq = AccountQueries(db_session, user_id=1)
         a1 = await aq.find_or_create("Checking")
         await db_session.commit()
         a2 = await aq.find_or_create("Checking")
@@ -110,7 +110,7 @@ class TestAccountQueries:
 class TestCsvImportQueries:
     async def test_upsert_new(self, db_session, make_account):
         acct = await make_account()
-        csq = CsvImportQueries(db_session)
+        csq = CsvImportQueries(db_session, user_id=1)
         ci = await csq.upsert(
             acct.id, "data.csv", 10, {"date": 0, "amount": 1, "description": 2}, None
         )
@@ -124,7 +124,7 @@ class TestCsvImportQueries:
         self, db_session, make_account, make_transaction
     ):
         acct = await make_account()
-        csq = CsvImportQueries(db_session)
+        csq = CsvImportQueries(db_session, user_id=1)
         existing = await csq.upsert(
             acct.id, "data.csv", 5, {"date": 0, "amount": 1, "description": 2}, None
         )
@@ -157,7 +157,7 @@ class TestCsvImportQueries:
 
     async def test_mark_complete(self, db_session, make_account):
         acct = await make_account()
-        csq = CsvImportQueries(db_session)
+        csq = CsvImportQueries(db_session, user_id=1)
         ci = await csq.upsert(
             acct.id, "data.csv", 5, {"date": 0, "amount": 1, "description": 2}, None
         )
@@ -169,7 +169,7 @@ class TestCsvImportQueries:
 
     async def test_increment_enriched(self, db_session, make_account):
         acct = await make_account()
-        csq = CsvImportQueries(db_session)
+        csq = CsvImportQueries(db_session, user_id=1)
         ci = await csq.upsert(
             acct.id, "data.csv", 20, {"date": 0, "amount": 1, "description": 2}, None
         )
@@ -183,7 +183,7 @@ class TestCsvImportQueries:
 
     async def test_find_by_filename_found(self, db_session, make_account):
         acct = await make_account()
-        csq = CsvImportQueries(db_session)
+        csq = CsvImportQueries(db_session, user_id=1)
         ci = await csq.upsert(
             acct.id, "bank.csv", 5, {"date": 0, "amount": 1, "description": 2}, None
         )
@@ -200,6 +200,7 @@ class TestCsvImportQueries:
     async def test_reset_for_reenrichment(self, db_session, make_account):
         acct = await make_account()
         ci = CsvImport(
+            user_id=1,
             account_id=acct.id,
             filename="f.csv",
             row_count=10,
@@ -223,7 +224,7 @@ class TestCsvImportQueries:
 
 class TestMerchantQueries:
     async def test_find_or_create_for_enrichment_new(self, db_session):
-        mq = MerchantQueries(db_session)
+        mq = MerchantQueries(db_session, user_id=1)
         cache: dict = {}
         mid = await mq.find_or_create_for_enrichment("Starbucks", "Seattle, WA", cache)
         await db_session.commit()
@@ -231,7 +232,7 @@ class TestMerchantQueries:
         assert "Starbucks" in cache
 
     async def test_find_or_create_for_enrichment_cache_hit(self, db_session):
-        mq = MerchantQueries(db_session)
+        mq = MerchantQueries(db_session, user_id=1)
         cache: dict = {}
         mid1 = await mq.find_or_create_for_enrichment("Starbucks", None, cache)
         await db_session.commit()
@@ -239,7 +240,7 @@ class TestMerchantQueries:
         assert mid1 == mid2
 
     async def test_find_or_create_updates_null_location(self, db_session):
-        mq = MerchantQueries(db_session)
+        mq = MerchantQueries(db_session, user_id=1)
         cache: dict = {}
         mid = await mq.find_or_create_for_enrichment("Target", None, cache)
         await db_session.commit()
@@ -307,7 +308,7 @@ class TestMerchantQueries:
 
 class TestCategoryQueries:
     async def test_find_or_create_for_enrichment_new(self, db_session):
-        cq = CategoryQueries(db_session)
+        cq = CategoryQueries(db_session, user_id=1)
         cache: dict = {}
         cid = await cq.find_or_create_for_enrichment("Food & Drink", cache)
         await db_session.commit()
@@ -315,7 +316,7 @@ class TestCategoryQueries:
         assert cache["Food & Drink"] == cid
 
     async def test_find_or_create_for_enrichment_cache_hit(self, db_session):
-        cq = CategoryQueries(db_session)
+        cq = CategoryQueries(db_session, user_id=1)
         cache: dict = {}
         cid1 = await cq.find_or_create_for_enrichment("Food & Drink", cache)
         await db_session.commit()
@@ -323,7 +324,7 @@ class TestCategoryQueries:
         assert cid1 == cid2
 
     async def test_find_or_create_subcategory_for_enrichment(self, db_session):
-        cq = CategoryQueries(db_session)
+        cq = CategoryQueries(db_session, user_id=1)
         cat_cache: dict = {}
         sub_cache: dict = {}
         cid = await cq.find_or_create_for_enrichment("Food & Drink", cat_cache)
@@ -336,7 +337,7 @@ class TestCategoryQueries:
         assert (cid, "Restaurants") in sub_cache
 
     async def test_find_or_create_subcategory_cache_hit(self, db_session):
-        cq = CategoryQueries(db_session)
+        cq = CategoryQueries(db_session, user_id=1)
         cat_cache: dict = {}
         sub_cache: dict = {}
         cid = await cq.find_or_create_for_enrichment("Shopping", cat_cache)
@@ -351,7 +352,7 @@ class TestCategoryQueries:
         assert sid1 == sid2
 
     async def test_list_all(self, db_session):
-        cq = CategoryQueries(db_session)
+        cq = CategoryQueries(db_session, user_id=1)
         cat_cache: dict = {}
         sub_cache: dict = {}
         cid = await cq.find_or_create_for_enrichment("Food & Drink", cat_cache)
@@ -570,7 +571,7 @@ class TestTransactionQueries:
         assert result.account.name == "Checking"
 
     async def test_find_or_create_merchant(self, db_session):
-        txq = TransactionQueries(db_session)
+        txq = TransactionQueries(db_session, user_id=1)
         m = await txq.find_or_create_merchant("Target")
         await db_session.commit()
         assert m.id is not None
@@ -578,14 +579,14 @@ class TestTransactionQueries:
         assert m.id == m2.id
 
     async def test_find_or_create_category(self, db_session):
-        txq = TransactionQueries(db_session)
+        txq = TransactionQueries(db_session, user_id=1)
         cat = await txq.find_or_create_category("Shopping")
         await db_session.commit()
         cat2 = await txq.find_or_create_category("Shopping")
         assert cat.id == cat2.id
 
     async def test_find_or_create_subcategory(self, db_session):
-        txq = TransactionQueries(db_session)
+        txq = TransactionQueries(db_session, user_id=1)
         cat = await txq.find_or_create_category("Shopping")
         await db_session.commit()
         sub = await txq.find_or_create_subcategory(cat.id, "Online Shopping")
@@ -671,7 +672,7 @@ class TestTransactionQueries:
 
 class TestCardHolderQueries:
     async def test_find_or_create_new(self, db_session):
-        chq = CardHolderQueries(db_session)
+        chq = CardHolderQueries(db_session, user_id=1)
         cache: dict[str, int] = {}
         ch_id = await chq.find_or_create_for_enrichment("1234", cache)
         await db_session.commit()
@@ -687,7 +688,7 @@ class TestCardHolderQueries:
         assert ch_id == ch.id
 
     async def test_find_or_create_uses_cache(self, db_session):
-        chq = CardHolderQueries(db_session)
+        chq = CardHolderQueries(db_session, user_id=1)
         cache: dict[str, int] = {}
         id1 = await chq.find_or_create_for_enrichment("9999", cache)
         await db_session.commit()

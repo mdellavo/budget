@@ -29,7 +29,26 @@ export class ApiResponseError extends Error {
   }
 }
 
+function getToken(): string | null {
+  return localStorage.getItem("auth_token");
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function handle401(): void {
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_user");
+  window.location.href = "/login";
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    handle401();
+    throw new ApiResponseError(401, "Unauthorized");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -39,6 +58,32 @@ async function handleResponse<T>(res: Response): Promise<T> {
     throw new ApiResponseError(res.status, detail);
   }
   return res.json() as Promise<T>;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: { id: number; email: string; name: string };
+}
+
+export async function loginUser(email: string, password: string): Promise<LoginResponse> {
+  const form = new URLSearchParams();
+  form.set("username", email);
+  form.set("password", password);
+  const res = await fetch(`${BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {} // eslint-disable-line no-empty
+    throw new ApiResponseError(res.status, detail);
+  }
+  return res.json() as Promise<LoginResponse>;
 }
 
 export interface TransactionFilters {
@@ -70,7 +115,7 @@ export async function listTransactions(
   }
   const qs = params.toString();
   return handleResponse<TransactionsResponse>(
-    await fetch(`${BASE}/transactions${qs ? `?${qs}` : ""}`)
+    await fetch(`${BASE}/transactions${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
   );
 }
 
@@ -84,7 +129,9 @@ export interface MerchantFilters {
 }
 
 export async function getMerchant(id: number): Promise<MerchantItem> {
-  return handleResponse<MerchantItem>(await fetch(`${BASE}/merchants/${id}`));
+  return handleResponse<MerchantItem>(
+    await fetch(`${BASE}/merchants/${id}`, { headers: authHeaders() })
+  );
 }
 
 export interface MerchantUpdateBody {
@@ -96,7 +143,7 @@ export async function updateMerchant(id: number, body: MerchantUpdateBody): Prom
   return handleResponse<MerchantItem>(
     await fetch(`${BASE}/merchants/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
   );
@@ -108,7 +155,9 @@ export async function listMerchants(filters: MerchantFilters = {}): Promise<Merc
     if (val !== undefined && val !== "") params.set(key, String(val));
   }
   const qs = params.toString();
-  return handleResponse<MerchantsResponse>(await fetch(`${BASE}/merchants${qs ? `?${qs}` : ""}`));
+  return handleResponse<MerchantsResponse>(
+    await fetch(`${BASE}/merchants${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
 }
 
 export interface CategoryFilters {
@@ -126,7 +175,9 @@ export async function listCategories(filters: CategoryFilters = {}): Promise<Cat
     if (val !== undefined && val !== "") params.set(key, String(val));
   }
   const qs = params.toString();
-  return handleResponse<CategoriesResponse>(await fetch(`${BASE}/categories${qs ? `?${qs}` : ""}`));
+  return handleResponse<CategoriesResponse>(
+    await fetch(`${BASE}/categories${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
 }
 
 export interface AccountFilters {
@@ -151,7 +202,9 @@ export async function listAccounts(filters: AccountFilters = {}): Promise<Accoun
     if (val !== undefined && val !== "") params.set(key, String(val));
   }
   const qs = params.toString();
-  return handleResponse<AccountsResponse>(await fetch(`${BASE}/accounts${qs ? `?${qs}` : ""}`));
+  return handleResponse<AccountsResponse>(
+    await fetch(`${BASE}/accounts${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
 }
 
 export interface ImportFilters {
@@ -169,27 +222,37 @@ export async function listImports(filters: ImportFilters = {}): Promise<ImportsR
     if (val !== undefined && val !== "") params.set(key, String(val));
   }
   const qs = params.toString();
-  return handleResponse<ImportsResponse>(await fetch(`${BASE}/imports${qs ? `?${qs}` : ""}`));
+  return handleResponse<ImportsResponse>(
+    await fetch(`${BASE}/imports${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
 }
 
 export async function getOverview(): Promise<OverviewData> {
-  return handleResponse<OverviewData>(await fetch(`${BASE}/overview`));
+  return handleResponse<OverviewData>(await fetch(`${BASE}/overview`, { headers: authHeaders() }));
 }
 
 export async function getRecurring(): Promise<RecurringData> {
-  return handleResponse<RecurringData>(await fetch(`${BASE}/recurring`));
+  return handleResponse<RecurringData>(
+    await fetch(`${BASE}/recurring`, { headers: authHeaders() })
+  );
 }
 
 export async function listMonths(): Promise<MonthListResponse> {
-  return handleResponse<MonthListResponse>(await fetch(`${BASE}/monthly`));
+  return handleResponse<MonthListResponse>(
+    await fetch(`${BASE}/monthly`, { headers: authHeaders() })
+  );
 }
 
 export async function getMonthlyReport(month: string): Promise<MonthlyReport> {
-  return handleResponse<MonthlyReport>(await fetch(`${BASE}/monthly/${month}`));
+  return handleResponse<MonthlyReport>(
+    await fetch(`${BASE}/monthly/${month}`, { headers: authHeaders() })
+  );
 }
 
 export async function getImportProgress(importId: number): Promise<ImportProgress> {
-  return handleResponse<ImportProgress>(await fetch(`${BASE}/imports/${importId}/progress`));
+  return handleResponse<ImportProgress>(
+    await fetch(`${BASE}/imports/${importId}/progress`, { headers: authHeaders() })
+  );
 }
 
 export interface ParseQueryResponse {
@@ -201,7 +264,7 @@ export async function parseQuery(query: string): Promise<ParseQueryResponse> {
   return handleResponse<ParseQueryResponse>(
     await fetch(`${BASE}/ai/parse-query`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ query }),
     })
   );
@@ -225,7 +288,7 @@ export async function listCardHolders(
   }
   const qs = params.toString();
   return handleResponse<CardHoldersResponse>(
-    await fetch(`${BASE}/cardholders${qs ? `?${qs}` : ""}`)
+    await fetch(`${BASE}/cardholders${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
   );
 }
 
@@ -241,7 +304,7 @@ export async function updateCardHolder(
   return handleResponse<CardHolderItem>(
     await fetch(`${BASE}/cardholders/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
   );
@@ -263,7 +326,7 @@ export async function updateTransaction(
   return handleResponse<TransactionItem>(
     await fetch(`${BASE}/transactions/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
   );
@@ -301,7 +364,7 @@ export interface MergedMerchantResult {
 
 export async function findDuplicateMerchants(): Promise<FindDuplicatesResponse> {
   return handleResponse<FindDuplicatesResponse>(
-    await fetch(`${BASE}/ai/find-duplicate-merchants`, { method: "POST" })
+    await fetch(`${BASE}/ai/find-duplicate-merchants`, { method: "POST", headers: authHeaders() })
   );
 }
 
@@ -309,7 +372,7 @@ export async function mergeMerchants(body: MerchantMergeBody): Promise<MergedMer
   return handleResponse<MergedMerchantResult>(
     await fetch(`${BASE}/merchants/merge`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
   );
@@ -323,7 +386,7 @@ export async function reEnrichTransactions(ids: number[]): Promise<ReEnrichRespo
   return handleResponse<ReEnrichResponse>(
     await fetch(`${BASE}/transactions/re-enrich`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ transaction_ids: ids }),
     })
   );
@@ -332,13 +395,17 @@ export async function reEnrichTransactions(ids: number[]): Promise<ReEnrichRespo
 export async function reEnrichImport(
   importId: number
 ): Promise<{ status: string; csv_import_id: number }> {
-  return handleResponse(await fetch(`${BASE}/imports/${importId}/re-enrich`, { method: "POST" }));
+  return handleResponse(
+    await fetch(`${BASE}/imports/${importId}/re-enrich`, { method: "POST", headers: authHeaders() })
+  );
 }
 
 export async function abortImport(
   importId: number
 ): Promise<{ status: string; csv_import_id: number }> {
-  return handleResponse(await fetch(`${BASE}/imports/${importId}/abort`, { method: "POST" }));
+  return handleResponse(
+    await fetch(`${BASE}/imports/${importId}/abort`, { method: "POST", headers: authHeaders() })
+  );
 }
 
 export interface CategoryTrendFilters {
@@ -354,7 +421,7 @@ export async function getCategoryTrends(
   if (filters.date_to) params.set("date_to", filters.date_to);
   const qs = params.toString();
   return handleResponse<CategoryTrendsResponse>(
-    await fetch(`${BASE}/category-trends${qs ? `?${qs}` : ""}`)
+    await fetch(`${BASE}/category-trends${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
   );
 }
 
@@ -369,6 +436,6 @@ export async function importCsv(
   if (accountType) form.append("account_type", accountType);
   // Do NOT set Content-Type — fetch sets the multipart boundary automatically
   return handleResponse<ImportCsvResponse>(
-    await fetch(`${BASE}/import-csv`, { method: "POST", body: form })
+    await fetch(`${BASE}/import-csv`, { method: "POST", body: form, headers: authHeaders() })
   );
 }

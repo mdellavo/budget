@@ -18,8 +18,10 @@ from fastapi import (
     HTTPException,
     Query,
     UploadFile,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,8 +34,9 @@ from .ai import (
     merchant_duplicate_finder,
     query_parser,
 )
+from .auth import create_access_token, get_current_user, verify_password
 from .database import AsyncSessionLocal, Base, engine, get_db
-from .models import Merchant, Transaction
+from .models import Merchant, Transaction, User
 from .query import (
     AccountQueries,
     AnalyticsQueries,
@@ -96,6 +99,112 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             pass  # column already exists
+
+        # --- Multi-user migrations ---
+        # Recreate tables that need user_id NOT NULL + unique constraints
+        for table_check, create_sql, insert_sql in [
+            (
+                "accounts",
+                """CREATE TABLE accounts_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    institution TEXT,
+                    account_type TEXT,
+                    created_at DATETIME NOT NULL,
+                    UNIQUE(user_id, name)
+                )""",
+                "INSERT INTO accounts_new SELECT id, (SELECT MIN(id) FROM users), name, institution, account_type, created_at FROM accounts",
+            ),
+            (
+                "categories",
+                """CREATE TABLE categories_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    UNIQUE(user_id, name)
+                )""",
+                "INSERT INTO categories_new SELECT id, (SELECT MIN(id) FROM users), name FROM categories",
+            ),
+            (
+                "merchants",
+                """CREATE TABLE merchants_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    location TEXT,
+                    UNIQUE(user_id, name)
+                )""",
+                "INSERT INTO merchants_new SELECT id, (SELECT MIN(id) FROM users), name, location FROM merchants",
+            ),
+            (
+                "tags",
+                """CREATE TABLE tags_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    UNIQUE(user_id, name)
+                )""",
+                "INSERT INTO tags_new SELECT id, (SELECT MIN(id) FROM users), name FROM tags",
+            ),
+            (
+                "cardholders",
+                """CREATE TABLE cardholders_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT,
+                    card_number TEXT,
+                    UNIQUE(user_id, card_number)
+                )""",
+                "INSERT INTO cardholders_new SELECT id, (SELECT MIN(id) FROM users), name, card_number FROM cardholders",
+            ),
+            (
+                "csv_imports",
+                """CREATE TABLE csv_imports_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    account_id INTEGER NOT NULL REFERENCES accounts(id),
+                    filename TEXT NOT NULL,
+                    imported_at DATETIME NOT NULL,
+                    row_count INTEGER NOT NULL,
+                    enriched_rows INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'in-progress',
+                    column_mapping TEXT
+                )""",
+                "INSERT INTO csv_imports_new SELECT id, (SELECT MIN(id) FROM users), account_id, filename, imported_at, row_count, enriched_rows, status, column_mapping FROM csv_imports",
+            ),
+            (
+                "transactions",
+                """CREATE TABLE transactions_new (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    account_id INTEGER NOT NULL REFERENCES accounts(id),
+                    csv_import_id INTEGER REFERENCES csv_imports(id),
+                    date DATE NOT NULL,
+                    description TEXT NOT NULL,
+                    raw_description TEXT,
+                    amount NUMERIC(12, 2) NOT NULL,
+                    merchant_id INTEGER REFERENCES merchants(id),
+                    subcategory_id INTEGER REFERENCES subcategories(id),
+                    cardholder_id INTEGER REFERENCES cardholders(id),
+                    notes TEXT,
+                    is_recurring BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL
+                )""",
+                "INSERT INTO transactions_new SELECT id, (SELECT MIN(id) FROM users), account_id, csv_import_id, date, description, raw_description, amount, merchant_id, subcategory_id, cardholder_id, notes, is_recurring, created_at FROM transactions",
+            ),
+        ]:
+            result = await conn.execute(text(f"PRAGMA table_info({table_check})"))
+            col_info = {row[1]: row[3] for row in result}
+            # Migrate if user_id is missing or nullable (notnull flag == 0)
+            if "user_id" not in col_info or col_info.get("user_id") == 0:
+                await conn.execute(text(create_sql))
+                await conn.execute(text(insert_sql))
+                await conn.execute(text(f"DROP TABLE {table_check}"))
+                await conn.execute(
+                    text(f"ALTER TABLE {table_check}_new RENAME TO {table_check}")
+                )
+
     yield
 
 
@@ -108,6 +217,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/auth/login")
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == form_data.username))
+    user = result.scalar_one_or_none()
+    if user is None or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = create_access_token(user.id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "email": user.email, "name": user.name},
+    }
+
 
 DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%B %d, %Y"]
 
@@ -138,6 +269,7 @@ async def _run_enrichment(
     account_id: int,
     csv_import_id: int,
     account_type: str | None = None,
+    user_id: int | None = None,
 ) -> None:
     logger.info(
         "Background enrichment starting for csv_import_id=%d (%d rows)",
@@ -176,10 +308,10 @@ async def _run_enrichment(
     ]
 
     async with AsyncSessionLocal() as db:
-        mq = MerchantQueries(db)
-        cq = CategoryQueries(db)
-        chq = CardHolderQueries(db)
-        csq = CsvImportQueries(db)
+        mq = MerchantQueries(db, user_id=user_id)
+        cq = CategoryQueries(db, user_id=user_id)
+        chq = CardHolderQueries(db, user_id=user_id)
+        csq = CsvImportQueries(db, user_id=user_id)
         merchant_cache: dict[str, tuple[int, bool]] = {}  # name → (id, has_location)
         category_cache: dict[str, int] = {}
         subcategory_cache: dict[tuple, int] = {}
@@ -255,6 +387,7 @@ async def _run_enrichment(
                         subcategory_id=subcategory_id,
                         cardholder_id=cardholder_id,
                         is_recurring=is_recurring,
+                        user_id=user_id,
                     )
                 )
 
@@ -308,8 +441,13 @@ def _classify_gap(median_days: float) -> str | None:
 
 
 @app.get("/recurring")
-async def get_recurring(db: AsyncSession = Depends(get_db)):
-    rows = await AnalyticsQueries(db).get_recurring_transactions()
+async def get_recurring(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = await AnalyticsQueries(
+        db, user_id=current_user.id
+    ).get_recurring_transactions()
 
     groups: dict[object, list] = defaultdict(list)
     for r in rows:
@@ -356,14 +494,21 @@ async def get_recurring(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/monthly")
-async def list_months(db: AsyncSession = Depends(get_db)):
-    months = await AnalyticsQueries(db).list_months()
+async def list_months(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    months = await AnalyticsQueries(db, user_id=current_user.id).list_months()
     return {"months": months}
 
 
 @app.get("/monthly/{month}")
-async def get_monthly_report(month: str, db: AsyncSession = Depends(get_db)):
-    aq = AnalyticsQueries(db)
+async def get_monthly_report(
+    month: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    aq = AnalyticsQueries(db, user_id=current_user.id)
     stats = await aq.get_month_stats(month)
     transaction_count = stats["transaction_count"]
     income = stats["income"]
@@ -408,8 +553,11 @@ async def get_monthly_report(month: str, db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/overview")
-async def get_overview(db: AsyncSession = Depends(get_db)):
-    aq = AnalyticsQueries(db)
+async def get_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    aq = AnalyticsQueries(db, user_id=current_user.id)
     summary = await aq.get_overview_summary()
     transaction_count = summary["transaction_count"]
     net = summary["net"]
@@ -467,8 +615,9 @@ async def get_category_trends(
     date_from: str | None = None,
     date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    q = AnalyticsQueries(db)
+    q = AnalyticsQueries(db, user_id=current_user.id)
     rows = await q.get_category_trends(date_from, date_to)
     return {
         "items": [
@@ -491,8 +640,11 @@ async def list_merchants(
     sort_by: Literal["name", "transaction_count", "total_amount"] = Query("name"),
     sort_dir: Literal["asc", "desc"] = Query("asc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    items, has_more, next_cursor = await MerchantQueries(db).paginate(
+    items, has_more, next_cursor = await MerchantQueries(
+        db, user_id=current_user.id
+    ).paginate(
         name=name,
         location=location,
         sort_by=sort_by,
@@ -527,8 +679,12 @@ def _merchant_row(merchant: Merchant, transaction_count: int, total_amount) -> d
 
 
 @app.get("/merchants/{merchant_id}")
-async def get_merchant(merchant_id: int, db: AsyncSession = Depends(get_db)):
-    mq = MerchantQueries(db)
+async def get_merchant(
+    merchant_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mq = MerchantQueries(db, user_id=current_user.id)
     merchant = await mq.get_by_id(merchant_id)
     if merchant is None:
         raise HTTPException(status_code=404, detail="Merchant not found")
@@ -543,9 +699,12 @@ class MerchantUpdate(BaseModel):
 
 @app.patch("/merchants/{merchant_id}")
 async def update_merchant(
-    merchant_id: int, body: MerchantUpdate, db: AsyncSession = Depends(get_db)
+    merchant_id: int,
+    body: MerchantUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    mq = MerchantQueries(db)
+    mq = MerchantQueries(db, user_id=current_user.id)
     merchant = await mq.get_by_id(merchant_id)
     if merchant is None:
         raise HTTPException(status_code=404, detail="Merchant not found")
@@ -569,8 +728,9 @@ async def list_categories(
     ] = Query("category"),
     sort_dir: Literal["asc", "desc"] = Query("asc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    rows = await CategoryQueries(db).list_with_stats(
+    rows = await CategoryQueries(db, user_id=current_user.id).list_with_stats(
         date_from=date_from,
         date_to=date_to,
         category=category,
@@ -614,8 +774,11 @@ async def list_accounts(
     ] = Query("name"),
     sort_dir: Literal["asc", "desc"] = Query("asc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    items, has_more, next_cursor = await AccountQueries(db).list(
+    items, has_more, next_cursor = await AccountQueries(
+        db, user_id=current_user.id
+    ).list(
         name=name,
         institution=institution,
         account_type=account_type,
@@ -657,8 +820,11 @@ async def list_imports(
     ] = Query("imported_at"),
     sort_dir: Literal["asc", "desc"] = Query("desc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    items, has_more, next_cursor = await CsvImportQueries(db).list(
+    items, has_more, next_cursor = await CsvImportQueries(
+        db, user_id=current_user.id
+    ).list(
         filename=filename,
         account=account,
         sort_by=sort_by,
@@ -686,8 +852,14 @@ async def list_imports(
 
 
 @app.get("/imports/{import_id}/progress")
-async def get_import_progress(import_id: int, db: AsyncSession = Depends(get_db)):
-    csv_import = await CsvImportQueries(db).get_by_id(import_id)
+async def get_import_progress(
+    import_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    csv_import = await CsvImportQueries(db, user_id=current_user.id).get_by_id(
+        import_id
+    )
     if csv_import is None:
         raise HTTPException(status_code=404, detail="Import not found")
     return {
@@ -699,7 +871,9 @@ async def get_import_progress(import_id: int, db: AsyncSession = Depends(get_db)
     }
 
 
-async def _run_reenrichment_for_import(csv_import_id: int) -> None:
+async def _run_reenrichment_for_import(
+    csv_import_id: int, user_id: int | None = None
+) -> None:
     logger.info("Re-enrichment starting for csv_import_id=%d", csv_import_id)
 
     async with AsyncSessionLocal() as db:
@@ -763,10 +937,10 @@ async def _run_reenrichment_for_import(csv_import_id: int) -> None:
     ]
 
     async with AsyncSessionLocal() as db:
-        mq = MerchantQueries(db)
-        cq = CategoryQueries(db)
-        chq = CardHolderQueries(db)
-        csq = CsvImportQueries(db)
+        mq = MerchantQueries(db, user_id=user_id)
+        cq = CategoryQueries(db, user_id=user_id)
+        chq = CardHolderQueries(db, user_id=user_id)
+        csq = CsvImportQueries(db, user_id=user_id)
         merchant_cache: dict[str, tuple[int, bool]] = {}
         category_cache: dict[str, int] = {}
         subcategory_cache: dict[tuple, int] = {}
@@ -841,8 +1015,12 @@ async def _run_reenrichment_for_import(csv_import_id: int) -> None:
 
 
 @app.post("/imports/{import_id}/abort")
-async def abort_import(import_id: int, db: AsyncSession = Depends(get_db)):
-    q = CsvImportQueries(db)
+async def abort_import(
+    import_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = CsvImportQueries(db, user_id=current_user.id)
     imp = await q.get_by_id(import_id)
     if not imp:
         raise HTTPException(status_code=404, detail="Import not found")
@@ -860,8 +1038,9 @@ async def re_enrich_import(
     import_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    csq = CsvImportQueries(db)
+    csq = CsvImportQueries(db, user_id=current_user.id)
     csv_import = await csq.get_by_id(import_id)
     if csv_import is None:
         raise HTTPException(status_code=404, detail="Import not found")
@@ -869,7 +1048,7 @@ async def re_enrich_import(
         raise HTTPException(status_code=409, detail="Import is already being enriched")
     await csq.reset_for_reenrichment(import_id)
     await db.commit()
-    background_tasks.add_task(_run_reenrichment_for_import, import_id)
+    background_tasks.add_task(_run_reenrichment_for_import, import_id, current_user.id)
     return {"status": "processing", "csv_import_id": import_id}
 
 
@@ -880,6 +1059,7 @@ async def import_csv(
     account_name: str = Form(...),
     account_type: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a CSV")
@@ -902,14 +1082,14 @@ async def import_csv(
         )
 
     # Upsert Account by name
-    aq = AccountQueries(db)
+    aq = AccountQueries(db, user_id=current_user.id)
     account = await aq.find_or_create(account_name)
 
     if account_type is not None:
         account.account_type = account_type
 
     # Re-import check: find existing CsvImport by filename
-    csq = CsvImportQueries(db)
+    csq = CsvImportQueries(db, user_id=current_user.id)
     existing = await csq.find_by_filename(file.filename)
     csv_import = await csq.upsert(
         account.id, file.filename, len(rows), column_mapping, existing
@@ -944,6 +1124,7 @@ async def import_csv(
         account.id,
         csv_import.id,
         account_type,
+        current_user.id,
     )
 
     return {
@@ -1004,8 +1185,9 @@ async def list_transactions(
     ] = Query("date"),
     sort_dir: Literal["asc", "desc"] = Query("desc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    txq = TransactionQueries(db)
+    txq = TransactionQueries(db, user_id=current_user.id)
     conditions = txq.build_conditions(
         date_from=date_from,
         date_to=date_to,
@@ -1074,8 +1256,9 @@ async def update_transaction(
     transaction_id: int,
     body: TransactionUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    txq = TransactionQueries(db)
+    txq = TransactionQueries(db, user_id=current_user.id)
     tx = await txq.get_by_id(transaction_id)
     if tx is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -1107,7 +1290,7 @@ async def update_transaction(
 
     # CardHolder
     if body.card_number and body.card_number.strip():
-        chq = CardHolderQueries(db)
+        chq = CardHolderQueries(db, user_id=current_user.id)
         ch_id = await chq.find_or_create_for_enrichment(body.card_number.strip(), {})
         tx.cardholder_id = ch_id
     else:
@@ -1143,12 +1326,14 @@ class ReEnrichRequest(BaseModel):
 
 @app.post("/transactions/re-enrich")
 async def re_enrich_transactions(
-    body: ReEnrichRequest, db: AsyncSession = Depends(get_db)
+    body: ReEnrichRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     if not body.transaction_ids:
         return {"items": []}
 
-    txq = TransactionQueries(db)
+    txq = TransactionQueries(db, user_id=current_user.id)
     transactions = await txq.get_by_ids(body.transaction_ids)
     eligible = [tx for tx in transactions if tx.raw_description]
 
@@ -1170,9 +1355,9 @@ async def re_enrich_transactions(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI enrichment failed: {e}")
 
-    mq = MerchantQueries(db)
-    cq = CategoryQueries(db)
-    chq = CardHolderQueries(db)
+    mq = MerchantQueries(db, user_id=current_user.id)
+    cq = CategoryQueries(db, user_id=current_user.id)
+    chq = CardHolderQueries(db, user_id=current_user.id)
     merchant_cache: dict[str, tuple[int, bool]] = {}
     category_cache: dict[str, int] = {}
     subcategory_cache: dict[tuple, int] = {}
@@ -1244,8 +1429,13 @@ class ParseQueryRequest(BaseModel):
 
 
 @app.post("/ai/find-duplicate-merchants")
-async def find_duplicate_merchants(db: AsyncSession = Depends(get_db)):
-    rows = await MerchantQueries(db).list_for_duplicate_detection()
+async def find_duplicate_merchants(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = await MerchantQueries(
+        db, user_id=current_user.id
+    ).list_for_duplicate_detection()
 
     if not rows:
         return {"groups": []}
@@ -1302,11 +1492,15 @@ class MerchantMerge(BaseModel):
 
 
 @app.post("/merchants/merge")
-async def merge_merchants(body: MerchantMerge, db: AsyncSession = Depends(get_db)):
+async def merge_merchants(
+    body: MerchantMerge,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     if len(body.merchant_ids) < 2:
         raise HTTPException(status_code=400, detail="At least 2 merchant IDs required")
 
-    mq = MerchantQueries(db)
+    mq = MerchantQueries(db, user_id=current_user.id)
     rows = await mq.get_by_ids(body.merchant_ids)
 
     found_ids = {m.id for m in rows}
@@ -1348,8 +1542,11 @@ async def list_cardholders(
     ] = Query("card_number"),
     sort_dir: Literal["asc", "desc"] = Query("asc"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    items, has_more, next_cursor = await CardHolderQueries(db).paginate(
+    items, has_more, next_cursor = await CardHolderQueries(
+        db, user_id=current_user.id
+    ).paginate(
         name=name,
         card_number=card_number,
         sort_by=sort_by,
@@ -1380,9 +1577,12 @@ class CardHolderUpdate(BaseModel):
 
 @app.patch("/cardholders/{cardholder_id}")
 async def update_cardholder(
-    cardholder_id: int, body: CardHolderUpdate, db: AsyncSession = Depends(get_db)
+    cardholder_id: int,
+    body: CardHolderUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    chq = CardHolderQueries(db)
+    chq = CardHolderQueries(db, user_id=current_user.id)
     ch = await chq.get_by_id(cardholder_id)
     if ch is None:
         raise HTTPException(status_code=404, detail="Card holder not found")
@@ -1400,10 +1600,12 @@ async def update_cardholder(
 
 @app.post("/ai/parse-query")
 async def parse_query_endpoint(
-    body: ParseQueryRequest, db: AsyncSession = Depends(get_db)
+    body: ParseQueryRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     # Fetch all known categories and subcategories so Claude uses exact strings
-    rows = await CategoryQueries(db).list_all()
+    rows = await CategoryQueries(db, user_id=current_user.id).list_all()
 
     # Build a human-readable list: "Food & Drink: Restaurants, Groceries, ..."
     cat_map: dict[str, list[str]] = defaultdict(list)
