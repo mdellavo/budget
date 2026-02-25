@@ -1439,3 +1439,218 @@ class TestClassifyGap:
     def test_between_ranges_returns_none(self):
         # 200 falls between quarterly (60–120) and annual (300–400)
         assert _classify_gap(200) is None
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+
+class TestAuth:
+    # --- POST /auth/login ---
+
+    async def test_login_success(self, client, make_user):
+        await make_user(email="alice@example.com", password="hunter2")
+        r = await client.post(
+            "/auth/login",
+            data={"username": "alice@example.com", "password": "hunter2"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["token_type"] == "bearer"
+        assert "access_token" in body
+        assert body["user"]["email"] == "alice@example.com"
+
+    async def test_login_wrong_password(self, client, make_user):
+        await make_user(email="bob@example.com", password="correct")
+        r = await client.post(
+            "/auth/login",
+            data={"username": "bob@example.com", "password": "wrong"},
+        )
+        assert r.status_code == 401
+
+    async def test_login_unknown_email(self, client):
+        r = await client.post(
+            "/auth/login",
+            data={"username": "nobody@example.com", "password": "pass"},
+        )
+        assert r.status_code == 401
+
+    async def test_login_google_only_user(self, client, db_session):
+        # User with sentinel password hash cannot log in with a password
+        from budget.models import User
+
+        user = User(email="guser@example.com", name="G", password_hash="!google-oauth")
+        db_session.add(user)
+        await db_session.commit()
+        r = await client.post(
+            "/auth/login",
+            data={"username": "guser@example.com", "password": "anything"},
+        )
+        assert r.status_code == 401
+
+    # --- POST /auth/google ---
+
+    async def test_google_not_configured(self, client):
+        from unittest.mock import patch
+
+        with patch("budget.main.GOOGLE_CLIENT_ID", ""):
+            r = await client.post("/auth/google", json={"credential": "tok"})
+        assert r.status_code == 503
+
+    async def test_google_invalid_token(self, client):
+        from unittest.mock import patch
+
+        with patch("budget.main.GOOGLE_CLIENT_ID", "test-client-id"), patch(
+            "budget.main.google_id_token.verify_oauth2_token",
+            side_effect=Exception("bad"),
+        ):
+            r = await client.post("/auth/google", json={"credential": "bad-tok"})
+        assert r.status_code == 401
+
+    async def test_google_creates_new_user(self, client):
+        from unittest.mock import patch
+
+        fake_id_info = {"sub": "g-123", "email": "new@example.com", "name": "New User"}
+        with patch("budget.main.GOOGLE_CLIENT_ID", "test-client-id"), patch(
+            "budget.main.google_id_token.verify_oauth2_token", return_value=fake_id_info
+        ):
+            r = await client.post("/auth/google", json={"credential": "valid-tok"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["user"]["email"] == "new@example.com"
+        assert "access_token" in body
+
+    async def test_google_existing_user_by_google_id(self, client, db_session):
+        from unittest.mock import patch
+
+        from budget.models import User
+
+        user = User(
+            email="existing@example.com",
+            name="Existing",
+            password_hash="!google-oauth",
+            google_id="g-456",
+        )
+        db_session.add(user)
+        await db_session.commit()
+        fake_id_info = {
+            "sub": "g-456",
+            "email": "existing@example.com",
+            "name": "Existing",
+        }
+        with patch("budget.main.GOOGLE_CLIENT_ID", "test-client-id"), patch(
+            "budget.main.google_id_token.verify_oauth2_token", return_value=fake_id_info
+        ):
+            r = await client.post("/auth/google", json={"credential": "valid-tok"})
+            r2 = await client.post("/auth/google", json={"credential": "valid-tok"})
+        # Both calls return the same user; no duplicate created
+        assert r.status_code == 200
+        assert r2.status_code == 200
+        assert r.json()["user"]["id"] == r2.json()["user"]["id"]
+
+    async def test_google_links_existing_email_user(
+        self, client, make_user, db_session
+    ):
+        from unittest.mock import patch
+
+        from budget.models import User  # noqa: F401
+
+        user = await make_user(email="link@example.com", password="pass")
+        assert user.google_id is None
+        fake_id_info = {
+            "sub": "g-789",
+            "email": "link@example.com",
+            "name": "Link User",
+        }
+        with patch("budget.main.GOOGLE_CLIENT_ID", "test-client-id"), patch(
+            "budget.main.google_id_token.verify_oauth2_token", return_value=fake_id_info
+        ):
+            r = await client.post("/auth/google", json={"credential": "valid-tok"})
+        assert r.status_code == 200
+        # google_id should now be set on the existing user
+        await db_session.refresh(user)
+        assert user.google_id == "g-789"
+
+
+# ---------------------------------------------------------------------------
+# Auth enforcement — protected endpoints must reject unauthenticated requests
+# ---------------------------------------------------------------------------
+
+
+class TestAuthRequired:
+    """Every protected route should return 401 with no token or a bad token."""
+
+    async def test_no_token_get_accounts(self, unauthed_client):
+        r = await unauthed_client.get("/accounts")
+        assert r.status_code == 401
+
+    async def test_no_token_get_transactions(self, unauthed_client):
+        r = await unauthed_client.get("/transactions")
+        assert r.status_code == 401
+
+    async def test_no_token_get_merchants(self, unauthed_client):
+        r = await unauthed_client.get("/merchants")
+        assert r.status_code == 401
+
+    async def test_no_token_get_categories(self, unauthed_client):
+        r = await unauthed_client.get("/categories")
+        assert r.status_code == 401
+
+    async def test_no_token_get_recurring(self, unauthed_client):
+        r = await unauthed_client.get("/recurring")
+        assert r.status_code == 401
+
+    async def test_no_token_get_overview(self, unauthed_client):
+        r = await unauthed_client.get("/overview")
+        assert r.status_code == 401
+
+    async def test_no_token_get_monthly(self, unauthed_client):
+        r = await unauthed_client.get("/monthly")
+        assert r.status_code == 401
+
+    async def test_no_token_get_imports(self, unauthed_client):
+        r = await unauthed_client.get("/imports")
+        assert r.status_code == 401
+
+    async def test_no_token_post_import_csv(self, unauthed_client):
+        r = await unauthed_client.post("/import-csv", data={}, files={})
+        assert r.status_code == 401
+
+    async def test_no_token_patch_merchant(self, unauthed_client):
+        r = await unauthed_client.patch("/merchants/1", json={"name": "X"})
+        assert r.status_code == 401
+
+    async def test_no_token_patch_transaction(self, unauthed_client):
+        r = await unauthed_client.patch("/transactions/1", json={})
+        assert r.status_code == 401
+
+    async def test_no_token_post_merge_merchants(self, unauthed_client):
+        r = await unauthed_client.post(
+            "/merchants/merge", json={"keep_id": 1, "merge_ids": [2]}
+        )
+        assert r.status_code == 401
+
+    async def test_no_token_get_cardholders(self, unauthed_client):
+        r = await unauthed_client.get("/cardholders")
+        assert r.status_code == 401
+
+    async def test_invalid_token_get_accounts(self, unauthed_client):
+        r = await unauthed_client.get(
+            "/accounts", headers={"Authorization": "Bearer not-a-valid-jwt"}
+        )
+        assert r.status_code == 401
+
+    async def test_expired_token_get_accounts(self, unauthed_client):
+        from datetime import UTC, datetime, timedelta
+
+        from jose import jwt as jose_jwt
+
+        expired_payload = {"sub": "1", "exp": datetime.now(UTC) - timedelta(days=1)}
+        token = jose_jwt.encode(
+            expired_payload, "dev-secret-change-me", algorithm="HS256"
+        )
+        r = await unauthed_client.get(
+            "/accounts", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert r.status_code == 401

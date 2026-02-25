@@ -61,6 +61,21 @@ async def client(db_session):
     app.dependency_overrides.clear()
 
 
+@pytest_asyncio.fixture
+async def unauthed_client(db_session):
+    """Client that overrides only get_db — auth runs for real."""
+
+    async def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # Data helper fixtures
 # ---------------------------------------------------------------------------
@@ -115,6 +130,21 @@ async def make_cardholder(db_session):
         await db_session.flush()
         await db_session.commit()
         return ch
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def make_user(db_session):
+    from budget.auth import hash_password
+    from budget.models import User
+
+    async def _make(email="test@example.com", name="Test User", password="password"):
+        user = User(email=email, name=name, password_hash=hash_password(password))
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.commit()
+        return user
 
     return _make
 
