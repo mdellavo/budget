@@ -8,6 +8,10 @@ if [ -f "$ROOT/.env" ]; then
   set -a && source "$ROOT/.env" && set +a
 fi
 
+if [ -f "$ROOT/frontend/.env" ]; then
+  set -a && source "$ROOT/frontend/.env" && set +a
+fi
+
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "Attaching to existing tmux session '$SESSION'..."
   tmux attach-session -t "$SESSION"
