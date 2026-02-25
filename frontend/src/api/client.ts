@@ -66,6 +66,16 @@ export interface LoginResponse {
   user: { id: number; email: string; name: string };
 }
 
+export async function googleAuth(credential: string): Promise<LoginResponse> {
+  const res = await fetch(`${BASE}/auth/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+  });
+  if (!res.ok) throw new Error("Google authentication failed");
+  return res.json() as Promise<LoginResponse>;
+}
+
 export async function loginUser(email: string, password: string): Promise<LoginResponse> {
   const form = new URLSearchParams();
   form.set("username", email);

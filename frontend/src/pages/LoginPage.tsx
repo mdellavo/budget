@@ -1,14 +1,75 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { googleAuth } from "../api/client";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (cfg: {
+            client_id: string;
+            callback: (r: { credential: string }) => void;
+          }) => void;
+          renderButton: (el: HTMLElement, opts: object) => void;
+        };
+      };
+    };
+  }
+}
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithGoogleToken } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId || !googleButtonRef.current) return;
+
+    const init = () => {
+      if (!window.google || !googleButtonRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }: { credential: string }) => {
+          setError(null);
+          setLoading(true);
+          try {
+            const data = await googleAuth(credential);
+            loginWithGoogleToken(data);
+            navigate("/overview", { replace: true });
+          } catch {
+            setError("Google sign-in failed. Please try again.");
+          } finally {
+            setLoading(false);
+          }
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: "outline",
+        size: "large",
+        width: "100%",
+      });
+    };
+
+    if (window.google) {
+      init();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.onload = init;
+    document.head.appendChild(script);
+    return () => {
+      script.onload = null;
+    };
+  }, [navigate, loginWithGoogleToken]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -59,6 +120,15 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200" />
+          </div>
+          <div className="relative flex justify-center text-xs text-gray-400">
+            <span className="bg-white px-2">or</span>
+          </div>
+        </div>
+        <div ref={googleButtonRef} />
       </div>
     </div>
   );

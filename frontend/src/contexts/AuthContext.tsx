@@ -13,6 +13,7 @@ interface AuthState {
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  loginWithGoogleToken: (data: { access_token: string; user: AuthUser }) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -46,8 +47,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     navigate("/login");
   }, [navigate]);
 
+  const loginWithGoogleToken = useCallback((data: { access_token: string; user: AuthUser }) => {
+    localStorage.setItem("auth_token", data.access_token);
+    localStorage.setItem("auth_user", JSON.stringify(data.user));
+    setToken(data.access_token);
+    setUser(data.user);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, token, login, logout, loginWithGoogleToken }}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 

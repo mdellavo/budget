@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -22,6 +23,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +54,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
 
 @asynccontextmanager
@@ -205,6 +210,21 @@ async def lifespan(app: FastAPI):
                     text(f"ALTER TABLE {table_check}_new RENAME TO {table_check}")
                 )
 
+        # Add google_id to users
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN google_id TEXT"))
+        except Exception:
+            pass  # column already exists
+        try:
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id "
+                    "ON users(google_id) WHERE google_id IS NOT NULL"
+                )
+            )
+        except Exception:
+            pass
+
     yield
 
 
@@ -217,6 +237,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str
 
 
 @app.post("/auth/login")
@@ -232,6 +256,57 @@ async def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    token = create_access_token(user.id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "email": user.email, "name": user.name},
+    }
+
+
+@app.post("/auth/google")
+async def google_login(
+    body: GoogleAuthRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google login not configured")
+    try:
+        id_info = await asyncio.to_thread(
+            google_id_token.verify_oauth2_token,
+            body.credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    google_id = id_info["sub"]
+    email: str = id_info.get("email", "")
+    name: str = id_info.get("name") or email.split("@")[0]
+
+    # Look up by google_id first, then fall back to email
+    result = await db.execute(select(User).where(User.google_id == google_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+
+    if user is None:
+        user = User(
+            email=email,
+            name=name,
+            password_hash="!google-oauth",
+            google_id=google_id,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    elif user.google_id is None:
+        # Link Google ID to an existing password-based account
+        user.google_id = google_id
+        await db.commit()
+
     token = create_access_token(user.id)
     return {
         "access_token": token,

@@ -30,6 +30,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True)
     name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200))
+    google_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     accounts: Mapped[list["Account"]] = relationship(back_populates="user")
