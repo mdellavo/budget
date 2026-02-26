@@ -3,6 +3,7 @@ import csv
 import io
 import logging
 import os
+from calendar import monthrange
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -27,6 +28,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from pydantic import BaseModel
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models  # noqa: F401 — ensures models are registered with Base
@@ -39,10 +41,11 @@ from .ai import (
 )
 from .auth import create_access_token, get_current_user, verify_password
 from .database import AsyncSessionLocal, Base, engine, get_db
-from .models import Merchant, Transaction, User
+from .models import Category, Merchant, Subcategory, Transaction, User
 from .query import (
     AccountQueries,
     AnalyticsQueries,
+    BudgetQueries,
     CardHolderQueries,
     CategoryQueries,
     CsvImportQueries,
@@ -101,6 +104,18 @@ async def lifespan(app: FastAPI):
                 text(
                     "ALTER TABLE transactions ADD COLUMN cardholder_id INTEGER REFERENCES cardholders(id)"
                 )
+            )
+        except Exception:
+            pass  # column already exists
+        try:
+            await conn.execute(
+                text("ALTER TABLE categories ADD COLUMN classification TEXT")
+            )
+        except Exception:
+            pass  # column already exists
+        try:
+            await conn.execute(
+                text("ALTER TABLE subcategories ADD COLUMN classification TEXT")
             )
         except Exception:
             pass  # column already exists
@@ -225,6 +240,26 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+        try:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS budgets (
+                        id INTEGER PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id),
+                        category_id INTEGER REFERENCES categories(id),
+                        subcategory_id INTEGER REFERENCES subcategories(id),
+                        amount_limit NUMERIC(12,2) NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        UNIQUE(user_id, category_id),
+                        UNIQUE(user_id, subcategory_id)
+                    )
+                """
+                )
+            )
+        except Exception:
+            pass
+
     yield
 
 
@@ -241,6 +276,74 @@ app.add_middleware(
 
 class GoogleAuthRequest(BaseModel):
     credential: str
+
+
+class BudgetCreate(BaseModel):
+    category_id: int | None = None
+    subcategory_id: int | None = None
+    amount_limit: Decimal
+
+
+class BudgetUpdate(BaseModel):
+    amount_limit: Decimal
+
+
+class BudgetBatchItem(BaseModel):
+    category_id: int | None = None
+    subcategory_id: int | None = None
+    amount_limit: Decimal
+
+
+class BudgetBatch(BaseModel):
+    items: list[BudgetBatchItem]
+
+
+def _compute_forecast(spent: Decimal, month: str) -> Decimal | None:
+    today = date.today()
+    current = today.strftime("%Y-%m")
+    if month > current:
+        return None  # future month
+    if month < current:
+        return spent  # past month: forecast = actual
+    year, mon = int(month[:4]), int(month[5:7])
+    days_in = monthrange(year, mon)[1]
+    return spent * Decimal(days_in) / Decimal(max(today.day, 1))
+
+
+def _budget_row_to_dict(row, spent: Decimal, forecast: Decimal | None) -> dict:
+    limit = Decimal(row.amount_limit)
+    pct = int(spent / limit * 100) if limit > 0 else 0
+    forecast_pct: int | None = None
+    if forecast is not None:
+        forecast_pct = int(forecast / limit * 100) if limit > 0 else 0
+
+    if pct >= 100 or (forecast_pct is not None and forecast_pct >= 100):
+        severity = "over"
+    elif pct >= 90 or (forecast_pct is not None and forecast_pct >= 90):
+        severity = "approaching"
+    else:
+        severity = None
+
+    if row.category_id is not None:
+        name = row.category_name or f"Category {row.category_id}"
+        scope = "category"
+    else:
+        name = row.subcategory_name or f"Subcategory {row.subcategory_id}"
+        scope = "subcategory"
+
+    return {
+        "id": row.id,
+        "name": name,
+        "scope": scope,
+        "category_id": row.category_id,
+        "subcategory_id": row.subcategory_id,
+        "amount_limit": str(limit),
+        "spent": str(spent),
+        "forecast": str(forecast) if forecast is not None else None,
+        "pct": pct,
+        "forecast_pct": forecast_pct,
+        "severity": severity,
+    }
 
 
 @app.post("/auth/login")
@@ -419,6 +522,7 @@ async def _run_enrichment(
                 mname = r.get("merchant_name")
                 mlocation = r.get("merchant_location")
                 cname = r.get("category")
+                need_want = r.get("need_want")
                 scname = r.get("subcategory")
                 cn = r.get("card_number")
 
@@ -438,7 +542,7 @@ async def _run_enrichment(
                 if cname and scname:
                     assert category_id is not None
                     subcategory_id = await cq.find_or_create_subcategory_for_enrichment(
-                        category_id, scname, subcategory_cache
+                        category_id, scname, subcategory_cache, need_want
                     )
 
                 cardholder_id = None
@@ -671,6 +775,19 @@ async def get_overview(
         if float(r.total) < 0
     ]
 
+    # --- budget warnings ---
+    bq = BudgetQueries(db, user_id=current_user.id)
+    today = date.today()
+    current_month = today.strftime("%Y-%m")
+    budget_rows = await bq.list_with_spending(current_month)
+    budget_warnings = []
+    for brow in budget_rows:
+        bspent = Decimal(brow.spent or 0)
+        bforecast = _compute_forecast(bspent, current_month)
+        bitem = _budget_row_to_dict(brow, bspent, bforecast)
+        if bitem["severity"] is not None:
+            budget_warnings.append(bitem)
+
     return {
         "transaction_count": transaction_count,
         "income": str(income),
@@ -682,6 +799,7 @@ async def get_overview(
             "income_sources": income_sources,
             "expense_categories": expense_categories,
         },
+        "budget_warnings": budget_warnings,
     }
 
 
@@ -820,6 +938,10 @@ async def list_categories(
                 "subcategory": r.subcategory,
                 "transaction_count": r.transaction_count,
                 "total_amount": str(r.total_amount),
+                "category_id": r.category_id,
+                "classification": r.classification,
+                "subcategory_id": r.subcategory_id,
+                "subcategory_classification": r.subcategory_classification,
             }
             for r in rows
         ]
@@ -1048,7 +1170,7 @@ async def _run_reenrichment_for_import(
                     cid = await cq.find_or_create_for_enrichment(cname, category_cache)
                     tx.subcategory_id = (
                         await cq.find_or_create_subcategory_for_enrichment(
-                            cid, scname, subcategory_cache
+                            cid, scname, subcategory_cache, r.get("need_want")
                         )
                     )
                 else:
@@ -1455,7 +1577,7 @@ async def re_enrich_transactions(
         if cname and scname:
             cid = await cq.find_or_create_for_enrichment(cname, category_cache)
             tx.subcategory_id = await cq.find_or_create_subcategory_for_enrichment(
-                cid, scname, subcategory_cache
+                cid, scname, subcategory_cache, r.get("need_want")
             )
         else:
             tx.subcategory_id = None
@@ -1709,3 +1831,264 @@ async def parse_query_endpoint(
             filters[key] = str(filters[key])
 
     return {"filters": filters, "explanation": explanation}
+
+
+@app.get("/categories/all")
+async def list_all_categories(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(
+                Category.id.label("category_id"),
+                Category.name.label("category_name"),
+                Category.classification.label("classification"),
+                Subcategory.id.label("subcategory_id"),
+                Subcategory.name.label("subcategory_name"),
+                Subcategory.classification.label("subcategory_classification"),
+            )
+            .join(Subcategory, Subcategory.category_id == Category.id)
+            .where(Category.user_id == current_user.id)
+            .order_by(Category.name, Subcategory.name)
+        )
+    ).all()
+    return {
+        "items": [
+            {
+                "category_id": r.category_id,
+                "category_name": r.category_name,
+                "classification": r.classification,
+                "subcategory_id": r.subcategory_id,
+                "subcategory_name": r.subcategory_name,
+                "subcategory_classification": r.subcategory_classification,
+            }
+            for r in rows
+        ]
+    }
+
+
+class CategoryUpdate(BaseModel):
+    classification: Literal["need", "want"] | None
+
+
+@app.patch("/categories/{category_id}")
+async def update_category(
+    category_id: int,
+    body: CategoryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cq = CategoryQueries(db, user_id=current_user.id)
+    updated = await cq.update_classification(category_id, body.classification)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Category not found")
+    await db.commit()
+    return {"id": category_id, "classification": body.classification}
+
+
+class SubcategoryUpdate(BaseModel):
+    classification: Literal["need", "want"] | None
+
+
+@app.patch("/subcategories/{subcategory_id}")
+async def update_subcategory(
+    subcategory_id: int,
+    body: SubcategoryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cq = CategoryQueries(db, user_id=current_user.id)
+    updated = await cq.update_subcategory_classification(
+        subcategory_id, body.classification
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Subcategory not found")
+    await db.commit()
+    return {"id": subcategory_id, "classification": body.classification}
+
+
+@app.get("/budgets")
+async def list_budgets(
+    month: str | None = Query(None, description="YYYY-MM month (default: current)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if month is None:
+        month = date.today().strftime("%Y-%m")
+    bq = BudgetQueries(db, user_id=current_user.id)
+    rows = await bq.list_with_spending(month)
+    items = []
+    for row in rows:
+        spent = Decimal(row.spent or 0)
+        forecast = _compute_forecast(spent, month)
+        items.append(_budget_row_to_dict(row, spent, forecast))
+    return {"items": items, "month": month}
+
+
+@app.post("/budgets", status_code=201)
+async def create_budget(
+    body: BudgetCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    has_cat = body.category_id is not None
+    has_sub = body.subcategory_id is not None
+    if has_cat == has_sub:
+        raise HTTPException(
+            status_code=422,
+            detail="Exactly one of category_id or subcategory_id must be set",
+        )
+    if body.amount_limit <= 0:
+        raise HTTPException(status_code=422, detail="amount_limit must be positive")
+    bq = BudgetQueries(db, user_id=current_user.id)
+    try:
+        budget = await bq.create(
+            category_id=body.category_id,
+            subcategory_id=body.subcategory_id,
+            amount_limit=body.amount_limit,
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Budget already exists for this category/subcategory",
+        )
+    # Re-fetch to get names
+    rows = await bq.list_with_spending(date.today().strftime("%Y-%m"))
+    row = next((r for r in rows if r.id == budget.id), None)
+    if row is None:
+        return {"id": budget.id}
+    spent = Decimal(row.spent or 0)
+    forecast = _compute_forecast(spent, date.today().strftime("%Y-%m"))
+    return _budget_row_to_dict(row, spent, forecast)
+
+
+@app.patch("/budgets/{budget_id}")
+async def update_budget(
+    budget_id: int,
+    body: BudgetUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if body.amount_limit <= 0:
+        raise HTTPException(status_code=422, detail="amount_limit must be positive")
+    bq = BudgetQueries(db, user_id=current_user.id)
+    budget = await bq.get(budget_id)
+    if budget is None:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    await bq.update(budget, body.amount_limit)
+    await db.commit()
+    month = date.today().strftime("%Y-%m")
+    rows = await bq.list_with_spending(month)
+    row = next((r for r in rows if r.id == budget_id), None)
+    if row is None:
+        return {"id": budget_id}
+    spent = Decimal(row.spent or 0)
+    forecast = _compute_forecast(spent, month)
+    return _budget_row_to_dict(row, spent, forecast)
+
+
+@app.delete("/budgets/{budget_id}", status_code=204)
+async def delete_budget(
+    budget_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bq = BudgetQueries(db, user_id=current_user.id)
+    deleted = await bq.delete(budget_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    await db.commit()
+
+
+@app.get("/budgets/wizard")
+async def budget_wizard(
+    months: int = Query(6, ge=1, le=24),
+    scope: Literal["category", "subcategory"] = Query("category"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    bq = BudgetQueries(db, user_id=current_user.id)
+
+    all_months = await aq.list_months()
+    look_back = all_months[:months]
+
+    if not look_back:
+        return {"items": [], "avg_monthly_income": "0", "months_analyzed": 0}
+
+    total_income = Decimal(0)
+    for m in look_back:
+        stats = await aq.get_month_stats(m)
+        total_income += Decimal(stats["income"])
+    avg_income = total_income / len(look_back)
+
+    suggestions = await bq.get_spending_averages(look_back, scope)
+
+    existing = await bq.list_with_spending(date.today().strftime("%Y-%m"))
+    budgeted_ids: set[int] = set()
+    for row in existing:
+        if scope == "category" and row.category_id is not None:
+            budgeted_ids.add(row.category_id)
+        elif scope == "subcategory" and row.subcategory_id is not None:
+            budgeted_ids.add(row.subcategory_id)
+
+    items = []
+    for row in suggestions:
+        avg = Decimal(row.avg_monthly)
+        pct_of_income = float(avg / avg_income * 100) if avg_income > 0 else None
+        items.append(
+            {
+                "id": row.id,
+                "name": row.name,
+                "scope": scope,
+                "avg_monthly": str(avg.quantize(Decimal("0.01"))),
+                "pct_of_income": round(pct_of_income, 1) if pct_of_income else None,
+                "already_budgeted": row.id in budgeted_ids,
+            }
+        )
+
+    return {
+        "items": items,
+        "avg_monthly_income": str(avg_income.quantize(Decimal("0.01"))),
+        "months_analyzed": len(look_back),
+    }
+
+
+@app.post("/budgets/batch", status_code=201)
+async def create_budgets_batch(
+    body: BudgetBatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bq = BudgetQueries(db, user_id=current_user.id)
+
+    existing_rows = await bq.list_with_spending(date.today().strftime("%Y-%m"))
+    existing_cat_ids = {
+        r.category_id for r in existing_rows if r.category_id is not None
+    }
+    existing_sub_ids = {
+        r.subcategory_id for r in existing_rows if r.subcategory_id is not None
+    }
+
+    created = 0
+    skipped = 0
+    for item in body.items:
+        has_cat = item.category_id is not None
+        has_sub = item.subcategory_id is not None
+        if has_cat == has_sub or item.amount_limit <= 0:
+            skipped += 1
+            continue
+        if has_cat and item.category_id in existing_cat_ids:
+            skipped += 1
+            continue
+        if has_sub and item.subcategory_id in existing_sub_ids:
+            skipped += 1
+            continue
+        await bq.create(item.category_id, item.subcategory_id, item.amount_limit)
+        created += 1
+
+    await db.commit()
+    return {"created": created, "skipped": skipped}

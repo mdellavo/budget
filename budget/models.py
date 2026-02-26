@@ -40,6 +40,7 @@ class User(Base):
     cardholders: Mapped[list["CardHolder"]] = relationship(back_populates="user")
     tags: Mapped[list["Tag"]] = relationship(back_populates="user")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+    budgets: Mapped[list["Budget"]] = relationship(back_populates="user")
 
 
 class Account(Base):
@@ -87,6 +88,8 @@ class Category(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(200))
+    classification: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # values: 'need', 'want', or NULL (unclassified)
 
     __table_args__ = (UniqueConstraint("user_id", "name"),)
 
@@ -100,6 +103,8 @@ class Subcategory(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     name: Mapped[str] = mapped_column(String(200))
+    classification: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # values: 'need', 'want', or NULL (unclassified)
 
     __table_args__ = (UniqueConstraint("category_id", "name"),)
 
@@ -152,6 +157,31 @@ class Tag(Base):
     transactions: Mapped[list["Transaction"]] = relationship(
         secondary=transaction_tags, back_populates="tags"
     )
+
+
+class Budget(Base):
+    __tablename__ = "budgets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # exactly one of these two is non-null (enforced in application logic)
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id"), nullable=True
+    )
+    subcategory_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subcategories.id"), nullable=True
+    )
+    amount_limit: Mapped[Decimal] = mapped_column(Numeric(12, 2))  # positive
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "category_id"),
+        UniqueConstraint("user_id", "subcategory_id"),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="budgets")
+    category: Mapped["Category | None"] = relationship()
+    subcategory: Mapped["Subcategory | None"] = relationship()
 
 
 class Transaction(Base):

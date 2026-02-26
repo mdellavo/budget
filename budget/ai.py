@@ -95,23 +95,23 @@ Bank descriptions are often truncated, uppercased, and contain store numbers or 
 
 Spending categories and subcategories to use (pick the best fit, suggest a subcategory if no matches exist):
 
-Education & Childcare: Daycare, Tuition, Childcare,
-Food & Drink: Restaurants, Groceries, Coffee & Tea, Fast Food, Bars & Alcohol, Delivery
-Shopping: Online Shopping, Clothing, Electronics, Home & Garden, Department Stores
-Transportation: Gas & Fuel, Rideshare, Parking, Public Transit, Auto Maintenance, Insurance, Parking
-Entertainment: Streaming, Movies & Theater, Games, Events & Concerts
-Health & Fitness: Gym, Medical, Pharmacy, Dental, Vision, Mental Health
-Travel: Hotels, Flights, Car Rental, Vacation Packages
-Bills & Utilities: Electricity, Gas, Internet, Phone, Insurance, Subscriptions
-Income: Paycheck, Transfer In, Refund, Interest Income, Reimbursement
-Personal Care: Hair & Beauty, Spa, Clothing Care
-Home: Rent, Mortgage, Home Services, Furniture
-Financial: Bank Fees, ATM, Investment, Loan Payment
-Subscriptions & Services:
-Loans & Debt:
-Technology/Software:
-Government & Fees:
-Other: anything that doesn't fit above
+Food & Drink: Groceries, Restaurants, Fast Food, Coffee & Tea, Bars & Alcohol, Food Delivery
+Shopping: Clothing, Electronics, Home & Garden, Online Shopping, Department Stores
+Transportation: Gas & Fuel, Auto Maintenance, Auto Insurance, Rideshare, Public Transit, Parking
+Bills & Utilities: Electricity, Gas, Water, Internet, Phone, Cable/Satellite
+Subscriptions & Services: Streaming, Software & Apps, Memberships, Newspapers & Magazines
+Health & Fitness: Medical, Dental, Vision, Pharmacy, Mental Health, Gym & Fitness
+Personal Care: Hair & Beauty, Spa & Massage, Laundry & Dry Cleaning
+Home: Rent, Mortgage, Furniture & Decor, Home Services & Repairs, Home Insurance
+Education & Childcare: Tuition & Fees, Daycare & Childcare, School Supplies, Student Loans
+Entertainment: Movies & Theater, Events & Concerts, Games, Hobbies
+Travel: Flights, Hotels & Lodging, Car Rental, Vacation Packages, Travel Insurance
+Loans & Debt: Credit Card Payment, Personal Loan, Auto Loan, Medical Debt
+Financial: Bank Fees, ATM Fees, Investment & Brokerage, Taxes, Wire & Transfer Fees
+Government & Fees: Taxes, DMV & Registration, Fines & Penalties, Postage & Shipping
+Giving: Charitable Donations, Gifts, Religious & Tithing
+Income: Paycheck, Freelance & Side Income, Reimbursement, Refund, Interest & Dividends, Transfer In
+Other: Anything that doesn't fit the above categories
 
 Rules:
 - merchant_name: canonical business name, Title Case, no location codes or store numbers
@@ -148,6 +148,10 @@ Rules:
 - Positive amounts are typically income/credits; negative amounts are expenses.
 - If a merchant cannot be identified, set merchant_name to null.
 - subcategory must be one of the values listed under the chosen category above.
+- need_want: Classify this specific subcategory as a "need" (essential, non-negotiable) or
+  "want" (discretionary). Classify at the subcategory level — within the same parent category,
+  some subcategories can be needs while others are wants (e.g. Groceries = need, but
+  Food Delivery and Restaurants = want, even though all are under Food & Drink).
 - Return a result for every transaction index provided — do not skip any.
 
 Transactions:
@@ -169,6 +173,19 @@ ENRICHMENT_SCHEMA = {
                     "category": {"type": ["string", "null"]},
                     "subcategory": {"type": ["string", "null"]},
                     "card_number": {"type": ["string", "null"]},
+                    "need_want": {
+                        "type": "string",
+                        "enum": ["need", "want"],
+                        "description": (
+                            "Whether this specific subcategory is a need (essential) or a want (discretionary). "
+                            "Classify at the subcategory level, not the parent category. "
+                            "e.g. under Food & Drink: Groceries → need, Food Delivery → want, Restaurants → want. "
+                            "Needs: groceries, utilities, rent/mortgage, healthcare, insurance, loan repayments, "
+                            "education, childcare, commuting. "
+                            "Wants: dining out, food delivery, entertainment, travel, shopping, hobbies, "
+                            "streaming services, personal luxuries. When genuinely ambiguous, lean toward 'need'."
+                        ),
+                    },
                 },
                 "required": [
                     "index",
@@ -179,6 +196,7 @@ ENRICHMENT_SCHEMA = {
                     "category",
                     "subcategory",
                     "card_number",
+                    "need_want",
                 ],
             },
         }

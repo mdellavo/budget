@@ -5,12 +5,13 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .models import (
     Account,
+    Budget,
     CardHolder,
     Category,
     CsvImport,
@@ -235,12 +236,23 @@ class CategoryQueries:
                     sub_expr.label("subcategory"),
                     count_expr.label("transaction_count"),
                     total_expr.label("total_amount"),
+                    Category.id.label("category_id"),
+                    Category.classification.label("classification"),
+                    Subcategory.id.label("subcategory_id"),
+                    Subcategory.classification.label("subcategory_classification"),
                 )
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
                 .where(*conditions)
-                .group_by(Category.name, Subcategory.name)
+                .group_by(
+                    Category.id,
+                    Category.name,
+                    Category.classification,
+                    Subcategory.id,
+                    Subcategory.name,
+                    Subcategory.classification,
+                )
                 .order_by(order_clause)
             )
         ).all()
@@ -272,8 +284,22 @@ class CategoryQueries:
             cache[name] = c.id
         return cache[name]
 
+    async def update_classification(
+        self, category_id: int, classification: str | None
+    ) -> bool:
+        result = await self.db.execute(
+            update(Category)
+            .where(Category.id == category_id, Category.user_id == self.user_id)
+            .values(classification=classification)
+        )
+        return result.rowcount > 0  # type: ignore[attr-defined]
+
     async def find_or_create_subcategory_for_enrichment(
-        self, category_id: int, name: str, cache: dict[tuple, int]
+        self,
+        category_id: int,
+        name: str,
+        cache: dict[tuple, int],
+        need_want: str | None = None,
     ) -> int:
         key = (category_id, name)
         if key not in cache:
@@ -283,14 +309,33 @@ class CategoryQueries:
                     Subcategory.name == name,
                 )
             )
-            sc = res.scalar_one_or_none() or Subcategory(
-                category_id=category_id, name=name
-            )
-            if sc.id is None:
+            sc = res.scalar_one_or_none()
+            if sc is None:
+                sc = Subcategory(
+                    category_id=category_id, name=name, classification=need_want
+                )
                 self.db.add(sc)
+                await self.db.flush()
+            elif sc.classification is None and need_want is not None:
+                sc.classification = need_want
                 await self.db.flush()
             cache[key] = sc.id
         return cache[key]
+
+    async def update_subcategory_classification(
+        self, subcategory_id: int, classification: str | None
+    ) -> bool:
+        result = await self.db.execute(
+            update(Subcategory)
+            .where(
+                Subcategory.id == subcategory_id,
+                Subcategory.category_id.in_(
+                    select(Category.id).where(Category.user_id == self.user_id)
+                ),
+            )
+            .values(classification=classification)
+        )
+        return result.rowcount > 0  # type: ignore[attr-defined]
 
 
 class CardHolderQueries:
@@ -1196,3 +1241,139 @@ class TransactionQueries:
             self.db.add(subcategory)
             await self.db.flush()
         return subcategory
+
+
+class BudgetQueries:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
+        self.db = db
+        self.user_id = user_id
+
+    def _user_filter(self) -> list:
+        if self.user_id is not None:
+            return [Budget.user_id == self.user_id]
+        return []
+
+    async def list_with_spending(self, month: str) -> list:
+        """Return all budgets with their spending for the given YYYY-MM month."""
+        month_filter = func.strftime("%Y-%m", Transaction.date) == month
+
+        cat_spent = (
+            select(func.coalesce(func.sum(-Transaction.amount), 0))
+            .join(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(
+                Subcategory.category_id == Budget.category_id,
+                Transaction.amount < 0,
+                month_filter,
+            )
+            .correlate(Budget)
+            .scalar_subquery()
+        )
+        sub_spent = (
+            select(func.coalesce(func.sum(-Transaction.amount), 0))
+            .where(
+                Transaction.subcategory_id == Budget.subcategory_id,
+                Transaction.amount < 0,
+                month_filter,
+            )
+            .correlate(Budget)
+            .scalar_subquery()
+        )
+        spent_expr = case((Budget.category_id.isnot(None), cat_spent), else_=sub_spent)
+
+        rows = (
+            await self.db.execute(
+                select(
+                    Budget.id,
+                    Budget.category_id,
+                    Budget.subcategory_id,
+                    Budget.amount_limit,
+                    Category.name.label("category_name"),
+                    Subcategory.name.label("subcategory_name"),
+                    spent_expr.label("spent"),
+                )
+                .outerjoin(Category, Budget.category_id == Category.id)
+                .outerjoin(Subcategory, Budget.subcategory_id == Subcategory.id)
+                .where(*self._user_filter())
+                .order_by(
+                    Category.name.asc().nulls_last(),
+                    Subcategory.name.asc().nulls_last(),
+                )
+            )
+        ).all()
+        return rows
+
+    async def get(self, budget_id: int) -> Budget | None:
+        return (
+            await self.db.execute(
+                select(Budget).where(Budget.id == budget_id, *self._user_filter())
+            )
+        ).scalar_one_or_none()
+
+    async def create(
+        self,
+        category_id: int | None,
+        subcategory_id: int | None,
+        amount_limit: Decimal,
+    ) -> Budget:
+        b = Budget(
+            user_id=self.user_id,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            amount_limit=amount_limit,
+        )
+        self.db.add(b)
+        await self.db.flush()
+        return b
+
+    async def update(self, budget: Budget, amount_limit: Decimal) -> None:
+        budget.amount_limit = amount_limit
+
+    async def delete(self, budget_id: int) -> bool:
+        budget = await self.get(budget_id)
+        if budget is None:
+            return False
+        await self.db.delete(budget)
+        return True
+
+    async def get_spending_averages(self, months: list, scope: str) -> list:
+        """
+        Average monthly spending per category or subcategory over the given months.
+        scope: "category" | "subcategory"
+        Returns rows with (id, name, avg_monthly).
+        """
+        if not months:
+            return []
+        month_count = len(months)
+        month_filter = func.strftime("%Y-%m", Transaction.date).in_(months)
+        user_filter = (
+            [Transaction.user_id == self.user_id] if self.user_id is not None else []
+        )
+
+        if scope == "category":
+            stmt = (
+                select(
+                    Category.id.label("id"),
+                    Category.name.label("name"),
+                    (func.sum(-Transaction.amount) / month_count).label("avg_monthly"),
+                )
+                .select_from(Transaction)
+                .join(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .join(Category, Subcategory.category_id == Category.id)
+                .where(Transaction.amount < 0, month_filter, *user_filter)
+                .group_by(Category.id, Category.name)
+                .order_by(func.sum(Transaction.amount).asc())
+            )
+        else:
+            stmt = (
+                select(
+                    Subcategory.id.label("id"),
+                    Subcategory.name.label("name"),
+                    (func.sum(-Transaction.amount) / month_count).label("avg_monthly"),
+                )
+                .select_from(Transaction)
+                .join(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .where(Transaction.amount < 0, month_filter, *user_filter)
+                .group_by(Subcategory.id, Subcategory.name)
+                .order_by(func.sum(Transaction.amount).asc())
+            )
+        return (await self.db.execute(stmt)).all()
