@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { getRecurring } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { RecurringItem } from "../types";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -33,7 +34,10 @@ export default function RecurringPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Recurring Charges</h1>
+      <div className="flex items-center gap-2 mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Recurring Charges</h1>
+        <HelpIcon section="recurring" />
+      </div>
 
       {loading && <div className="text-gray-500">Loading…</div>}
 

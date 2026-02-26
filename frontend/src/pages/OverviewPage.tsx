@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { getOverview } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { OverviewData, SankeyNode } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
@@ -23,7 +25,10 @@ export default function OverviewPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Overview</h1>
+      <div className="flex items-center gap-2 mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
+        <HelpIcon section="overview" />
+      </div>
 
       {loading && <div className="text-gray-500">Loading…</div>}
 
@@ -64,6 +69,44 @@ export default function OverviewPage() {
               }
             />
           </div>
+
+          {data.budget_warnings.length > 0 && (
+            <div className="mt-6">
+              <h2 className="text-lg font-semibold text-gray-800 mb-3">Budget Alerts</h2>
+              <div className="space-y-2">
+                {data.budget_warnings.map((w) => (
+                  <div
+                    key={w.id}
+                    className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                      w.severity === "over"
+                        ? "border-red-200 bg-red-50"
+                        : "border-amber-200 bg-amber-50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`text-sm font-medium ${w.severity === "over" ? "text-red-700" : "text-amber-700"}`}
+                      >
+                        {w.severity === "over" ? "Over budget" : "Approaching limit"}
+                      </span>
+                      <span className="text-sm text-gray-700">{w.name}</span>
+                    </div>
+                    <span
+                      className={`text-sm font-semibold ${w.severity === "over" ? "text-red-600" : "text-amber-600"}`}
+                    >
+                      {formatCurrency(w.spent)} / {formatCurrency(w.amount_limit)} ({w.pct}%)
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <Link
+                to="/budgets"
+                className="mt-2 inline-block text-sm text-indigo-600 hover:underline"
+              >
+                Manage budgets →
+              </Link>
+            </div>
+          )}
 
           {data.sankey.income_sources.length > 0 && (
             <div className="mt-8">

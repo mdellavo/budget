@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
-import { listCategories } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
+import {
+  listCategories,
+  setCategoryClassification,
+  setSubcategoryClassification,
+} from "../api/client";
 import type { CategoryFilters } from "../api/client";
-import type { CategoryItem } from "../types";
+import type { CategoryClassification, CategoryItem } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -11,6 +16,8 @@ type SubSortKey = "total_amount" | "transaction_count" | "subcategory";
 
 type CategoryGroup = {
   category: string;
+  category_id: number | null;
+  classification: CategoryClassification;
   total_amount: number;
   transaction_count: number;
   subcategories: CategoryItem[];
@@ -87,7 +94,61 @@ function CategoryDonutChart({ subcategories }: { subcategories: CategoryItem[] }
 
 // ── CategoryCard ───────────────────────────────────────────────────────────────
 
-function CategoryCard({ group, subSortBy }: { group: CategoryGroup; subSortBy: SubSortKey }) {
+function ClassificationToggle({
+  categoryId,
+  classification,
+  onChange,
+}: {
+  categoryId: number;
+  classification: CategoryClassification;
+  onChange: (id: number, c: CategoryClassification) => void;
+}) {
+  const btn = (label: string, value: CategoryClassification, activeClass: string) => {
+    const isActive = classification === value;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(categoryId, isActive ? null : value)}
+        className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+          isActive
+            ? activeClass
+            : "border-gray-300 text-gray-400 hover:border-gray-400 hover:text-gray-600"
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex items-center gap-1">
+      {btn("Need", "need", "border-indigo-500 bg-indigo-100 text-indigo-700")}
+      {btn("Want", "want", "border-amber-500 bg-amber-100 text-amber-700")}
+      {classification !== null && (
+        <button
+          type="button"
+          onClick={() => onChange(categoryId, null)}
+          className="px-2 py-0.5 rounded-full text-xs font-medium border border-gray-300 text-gray-400 hover:border-gray-400 hover:text-gray-600"
+        >
+          —
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CategoryCard({
+  group,
+  subSortBy,
+  onClassificationChange,
+  onSubclassificationChange,
+  subcategoryOverrides,
+}: {
+  group: CategoryGroup;
+  subSortBy: SubSortKey;
+  onClassificationChange: (id: number, c: CategoryClassification) => void;
+  onSubclassificationChange: (id: number, c: CategoryClassification) => void;
+  subcategoryOverrides: Record<number, CategoryClassification>;
+}) {
   const sorted = useMemo(() => {
     return [...group.subcategories].sort((a, b) => {
       if (subSortBy === "total_amount") {
@@ -107,18 +168,32 @@ function CategoryCard({ group, subSortBy }: { group: CategoryGroup; subSortBy: S
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
       {/* Card header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
-        <h2 className="text-base font-semibold text-gray-800">
-          {isUncategorized ? (
-            <span className="text-gray-400 italic">Uncategorized</span>
-          ) : (
-            <Link
-              to={`/transactions?category=${encodeURIComponent(group.category)}`}
-              className="text-indigo-600 hover:underline"
-            >
-              {group.category}
-            </Link>
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold text-gray-800">
+            {isUncategorized ? (
+              <Link
+                to="/transactions?uncategorized=true"
+                className="text-indigo-600 hover:underline italic"
+              >
+                Uncategorized
+              </Link>
+            ) : (
+              <Link
+                to={`/transactions?category=${encodeURIComponent(group.category)}`}
+                className="text-indigo-600 hover:underline"
+              >
+                {group.category}
+              </Link>
+            )}
+          </h2>
+          {!isUncategorized && group.category_id != null && (
+            <ClassificationToggle
+              categoryId={group.category_id}
+              classification={group.classification}
+              onChange={onClassificationChange}
+            />
           )}
-        </h2>
+        </div>
         <span
           className={`text-sm font-mono font-medium ${positive ? "text-green-600" : "text-red-600"}`}
         >
@@ -162,7 +237,12 @@ function CategoryCard({ group, subSortBy }: { group: CategoryGroup; subSortBy: S
                           style={{ backgroundColor: PALETTE[i % PALETTE.length] }}
                         />
                         {isUncatSub ? (
-                          <span className="text-gray-400 italic">Uncategorized</span>
+                          <Link
+                            to="/transactions?uncategorized=true"
+                            className="text-indigo-600 hover:underline italic"
+                          >
+                            Uncategorized
+                          </Link>
                         ) : (
                           <Link
                             to={`/transactions?subcategory=${encodeURIComponent(sub.subcategory)}`}
@@ -170,6 +250,17 @@ function CategoryCard({ group, subSortBy }: { group: CategoryGroup; subSortBy: S
                           >
                             {sub.subcategory}
                           </Link>
+                        )}
+                        {sub.subcategory_id != null && !isUncatSub && (
+                          <ClassificationToggle
+                            categoryId={sub.subcategory_id}
+                            classification={
+                              sub.subcategory_id in subcategoryOverrides
+                                ? subcategoryOverrides[sub.subcategory_id]
+                                : sub.subcategory_classification
+                            }
+                            onChange={onSubclassificationChange}
+                          />
                         )}
                       </div>
                     </td>
@@ -224,17 +315,66 @@ export default function CategoriesPage() {
     fetchRows(appliedFilters);
   }, [appliedFilters, fetchRows]);
 
+  const [classificationOverrides, setClassificationOverrides] = useState<
+    Record<number, CategoryClassification>
+  >({});
+  const [subcategoryOverrides, setSubcategoryOverrides] = useState<
+    Record<number, CategoryClassification>
+  >({});
+
+  async function handleClassificationChange(
+    categoryId: number,
+    classification: CategoryClassification
+  ) {
+    setClassificationOverrides((prev) => ({ ...prev, [categoryId]: classification }));
+    try {
+      await setCategoryClassification(categoryId, classification);
+    } catch {
+      // revert on failure
+      setClassificationOverrides((prev) => {
+        const next = { ...prev };
+        delete next[categoryId];
+        return next;
+      });
+    }
+  }
+
+  async function handleSubclassificationChange(
+    subcategoryId: number,
+    classification: CategoryClassification
+  ) {
+    setSubcategoryOverrides((prev) => ({ ...prev, [subcategoryId]: classification }));
+    try {
+      await setSubcategoryClassification(subcategoryId, classification);
+    } catch {
+      // revert on failure
+      setSubcategoryOverrides((prev) => {
+        const next = { ...prev };
+        delete next[subcategoryId];
+        return next;
+      });
+    }
+  }
+
   const groups = useMemo<CategoryGroup[]>(() => {
     const map = new Map<string, CategoryGroup>();
     for (const row of rows) {
-      const existing = map.get(row.category);
+      const key = row.category_id != null ? String(row.category_id) : row.category;
+      const existing = map.get(key);
       if (existing) {
         existing.subcategories.push(row);
         existing.total_amount += parseFloat(row.total_amount);
         existing.transaction_count += row.transaction_count;
       } else {
-        map.set(row.category, {
+        const baseClassification = row.classification;
+        const classification =
+          row.category_id != null && row.category_id in classificationOverrides
+            ? classificationOverrides[row.category_id]
+            : baseClassification;
+        map.set(key, {
           category: row.category,
+          category_id: row.category_id,
+          classification,
           total_amount: parseFloat(row.total_amount),
           transaction_count: row.transaction_count,
           subcategories: [row],
@@ -249,7 +389,7 @@ export default function CategoriesPage() {
       if (!aUncat && bUncat) return -1;
       return Math.abs(b.total_amount) - Math.abs(a.total_amount);
     });
-  }, [rows]);
+  }, [rows, classificationOverrides]);
 
   function handleApply(e: React.FormEvent) {
     e.preventDefault();
@@ -263,7 +403,10 @@ export default function CategoriesPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-6">Categories</h1>
+      <div className="flex items-center gap-2 mb-6">
+        <h1 className="text-2xl font-semibold text-gray-900">Categories</h1>
+        <HelpIcon section="categories" />
+      </div>
 
       {/* Filter bar */}
       <form
@@ -372,7 +515,14 @@ export default function CategoriesPage() {
       ) : (
         <div className="flex flex-col gap-6">
           {groups.map((group) => (
-            <CategoryCard key={group.category} group={group} subSortBy={subSortBy} />
+            <CategoryCard
+              key={group.category}
+              group={group}
+              subSortBy={subSortBy}
+              onClassificationChange={handleClassificationChange}
+              onSubclassificationChange={handleSubclassificationChange}
+              subcategoryOverrides={subcategoryOverrides}
+            />
           ))}
         </div>
       )}

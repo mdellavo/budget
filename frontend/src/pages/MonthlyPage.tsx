@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import HelpIcon from "../components/HelpIcon";
 import { listMonths, getMonthlyReport } from "../api/client";
 import type { MonthlyReport, CategoryBreakdown } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
@@ -214,7 +215,10 @@ export default function MonthlyPage() {
 
         {report && (
           <div className="max-w-4xl space-y-8">
-            <h1 className="text-2xl font-bold text-gray-900">{formatMonth(report.month)}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900">{formatMonth(report.month)}</h1>
+              <HelpIcon section="monthly" />
+            </div>
 
             {/* Summary cards */}
             <div>

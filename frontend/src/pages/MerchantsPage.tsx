@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listMerchants, updateMerchant } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { MerchantFilters } from "../api/client";
 import type { MerchantItem } from "../types";
 
@@ -300,7 +301,10 @@ export default function MerchantsPage() {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Merchants</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-gray-900">Merchants</h1>
+          <HelpIcon section="merchants" />
+        </div>
         <Link
           to="/merchants/merge"
           className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700"

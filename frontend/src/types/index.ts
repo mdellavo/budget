@@ -93,11 +93,17 @@ export interface AccountsResponse {
   next_cursor: number | null;
 }
 
+export type CategoryClassification = "need" | "want" | null;
+
 export interface CategoryItem {
   category: string;
   subcategory: string;
   transaction_count: number;
   total_amount: string;
+  category_id: number | null;
+  classification: CategoryClassification;
+  subcategory_id: number | null;
+  subcategory_classification: CategoryClassification;
 }
 
 export interface CategoriesResponse {
@@ -196,6 +202,53 @@ export interface CategoryTrendsResponse {
   items: CategoryTrendItem[];
 }
 
+export interface BudgetItem {
+  id: number;
+  name: string;
+  scope: "category" | "subcategory";
+  category_id: number | null;
+  subcategory_id: number | null;
+  amount_limit: string;
+  spent: string;
+  forecast: string | null;
+  pct: number;
+  forecast_pct: number | null;
+  severity: "approaching" | "over" | null;
+}
+
+export interface BudgetsResponse {
+  items: BudgetItem[];
+  month: string;
+}
+
+export interface CategoryOption {
+  category_id: number;
+  category_name: string;
+  subcategory_id: number;
+  subcategory_name: string;
+  classification: CategoryClassification;
+  subcategory_classification: CategoryClassification;
+}
+
+export interface CategoriesAllResponse {
+  items: CategoryOption[];
+}
+
+export interface WizardSuggestion {
+  id: number;
+  name: string;
+  scope: "category" | "subcategory";
+  avg_monthly: string;
+  pct_of_income: number | null;
+  already_budgeted: boolean;
+}
+
+export interface WizardResponse {
+  items: WizardSuggestion[];
+  avg_monthly_income: string;
+  months_analyzed: number;
+}
+
 export interface OverviewData {
   transaction_count: number;
   income: string;
@@ -207,4 +260,5 @@ export interface OverviewData {
     income_sources: SankeyNode[];
     expense_categories: SankeyNode[];
   };
+  budget_warnings: BudgetItem[];
 }

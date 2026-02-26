@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
+import HelpIcon from "../components/HelpIcon";
 import {
   listTransactions,
   listMerchants,
@@ -1072,6 +1073,7 @@ export default function TransactionsPage() {
 
       <div className="flex items-baseline gap-3 mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">Transactions</h1>
+        <HelpIcon section="transactions" />
         {totalCount !== null && (
           <span className="text-sm text-gray-500">
             {totalCount.toLocaleString()} {totalCount === 1 ? "transaction" : "transactions"}

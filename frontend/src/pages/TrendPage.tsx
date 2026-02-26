@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import HelpIcon from "../components/HelpIcon";
 import { getCategoryTrends } from "../api/client";
 import type { CategoryTrendItem } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
@@ -109,7 +110,10 @@ export default function TrendPage() {
   return (
     <div className="p-8">
       <div className="max-w-5xl space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Trends</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-900">Trends</h1>
+          <HelpIcon section="trends" />
+        </div>
 
         {/* Filter bar */}
         <form onSubmit={handleApply} className="flex items-end gap-4">

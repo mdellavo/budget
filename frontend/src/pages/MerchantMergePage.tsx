@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { findDuplicateMerchants, mergeMerchants } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { MergeGroup } from "../api/client";
 
 type GroupState = "pending" | "merged" | "skipped";
@@ -81,7 +82,10 @@ export default function MerchantMergePage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-1">Merge Duplicate Merchants</h1>
+      <div className="flex items-center gap-2 mb-1">
+        <h1 className="text-2xl font-semibold text-gray-900">Merge Duplicate Merchants</h1>
+        <HelpIcon section="merchants" />
+      </div>
       <p className="text-gray-500 text-sm mb-6">
         Claude will scan your merchants and suggest merges. Merchants with the same name but
         different locations are treated as different merchants.

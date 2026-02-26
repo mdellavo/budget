@@ -1,12 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
 import MerchantMergePage from "./MerchantMergePage";
 
 function renderPage() {
-  return render(<MerchantMergePage />);
+  return render(
+    <MemoryRouter>
+      <MerchantMergePage />
+    </MemoryRouter>
+  );
 }
 
 const MERGE_GROUP = {

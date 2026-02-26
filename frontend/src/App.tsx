@@ -14,6 +14,8 @@ import MonthlyPage from "./pages/MonthlyPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import CardHoldersPage from "./pages/CardHoldersPage";
 import TrendPage from "./pages/TrendPage";
+import BudgetPage from "./pages/BudgetPage";
+import HelpPage from "./pages/HelpPage";
 
 export default function App() {
   return (
@@ -41,6 +43,8 @@ export default function App() {
                       <Route path="/categories" element={<CategoriesPage />} />
                       <Route path="/cardholders" element={<CardHoldersPage />} />
                       <Route path="/trends" element={<TrendPage />} />
+                      <Route path="/budgets" element={<BudgetPage />} />
+                      <Route path="/help" element={<HelpPage />} />
                     </Routes>
                   </main>
                 </div>

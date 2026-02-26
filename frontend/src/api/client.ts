@@ -1,7 +1,10 @@
 import type {
   AccountsResponse,
+  BudgetItem,
+  BudgetsResponse,
   CardHolderItem,
   CardHoldersResponse,
+  CategoriesAllResponse,
   CategoriesResponse,
   CategoryTrendsResponse,
   ImportsResponse,
@@ -15,6 +18,7 @@ import type {
   RecurringData,
   TransactionItem,
   TransactionsResponse,
+  WizardResponse,
 } from "../types";
 
 const BASE = "/api";
@@ -447,5 +451,125 @@ export async function importCsv(
   // Do NOT set Content-Type — fetch sets the multipart boundary automatically
   return handleResponse<ImportCsvResponse>(
     await fetch(`${BASE}/import-csv`, { method: "POST", body: form, headers: authHeaders() })
+  );
+}
+
+export async function listAllCategories(): Promise<CategoriesAllResponse> {
+  return handleResponse<CategoriesAllResponse>(
+    await fetch(`${BASE}/categories/all`, { headers: authHeaders() })
+  );
+}
+
+export async function setCategoryClassification(
+  categoryId: number,
+  classification: "need" | "want" | null
+): Promise<void> {
+  await handleResponse(
+    await fetch(`${BASE}/categories/${categoryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ classification }),
+    })
+  );
+}
+
+export async function setSubcategoryClassification(
+  subcategoryId: number,
+  classification: "need" | "want" | null
+): Promise<void> {
+  await handleResponse(
+    await fetch(`${BASE}/subcategories/${subcategoryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ classification }),
+    })
+  );
+}
+
+export async function listBudgets(month?: string): Promise<BudgetsResponse> {
+  const qs = month ? `?month=${month}` : "";
+  return handleResponse<BudgetsResponse>(
+    await fetch(`${BASE}/budgets${qs}`, { headers: authHeaders() })
+  );
+}
+
+export interface BudgetCreateBody {
+  category_id?: number | null;
+  subcategory_id?: number | null;
+  amount_limit: string;
+}
+
+export async function createBudget(body: BudgetCreateBody): Promise<BudgetItem> {
+  return handleResponse<BudgetItem>(
+    await fetch(`${BASE}/budgets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
+export interface BudgetUpdateBody {
+  amount_limit: string;
+}
+
+export async function updateBudget(id: number, body: BudgetUpdateBody): Promise<BudgetItem> {
+  return handleResponse<BudgetItem>(
+    await fetch(`${BASE}/budgets/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
+export async function deleteBudget(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/budgets/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    handle401();
+    throw new ApiResponseError(401, "Unauthorized");
+  }
+  if (!res.ok && res.status !== 204) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {} // eslint-disable-line no-empty
+    throw new ApiResponseError(res.status, detail);
+  }
+}
+
+export async function getBudgetWizard(
+  months: number = 6,
+  scope: "category" | "subcategory" = "category"
+): Promise<WizardResponse> {
+  return handleResponse<WizardResponse>(
+    await fetch(`${BASE}/budgets/wizard?months=${months}&scope=${scope}`, {
+      headers: authHeaders(),
+    })
+  );
+}
+
+export interface BatchBudgetItem {
+  category_id?: number | null;
+  subcategory_id?: number | null;
+  amount_limit: string;
+}
+
+export interface BatchBudgetResponse {
+  created: number;
+  skipped: number;
+}
+
+export async function createBudgetsBatch(items: BatchBudgetItem[]): Promise<BatchBudgetResponse> {
+  return handleResponse<BatchBudgetResponse>(
+    await fetch(`${BASE}/budgets/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ items }),
+    })
   );
 }

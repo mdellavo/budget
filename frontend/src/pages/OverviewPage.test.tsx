@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
 import OverviewPage from "./OverviewPage";
@@ -17,17 +18,26 @@ const OVERVIEW_DATA = {
   savings_rate: 36.0,
   expense_breakdown: [],
   sankey: { income_sources: [], expense_categories: [] },
+  budget_warnings: [],
 };
 
 describe("OverviewPage", () => {
   it("shows loading indicator while fetching", () => {
-    render(<OverviewPage />);
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 
   it("hides loading and renders stat cards after successful fetch", async () => {
     server.use(http.get("/api/overview", () => HttpResponse.json(OVERVIEW_DATA)));
-    render(<OverviewPage />);
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
     // Transaction count
     expect(screen.getByText("150")).toBeInTheDocument();
@@ -41,7 +51,11 @@ describe("OverviewPage", () => {
 
   it("renders all 5 stat card labels", async () => {
     server.use(http.get("/api/overview", () => HttpResponse.json(OVERVIEW_DATA)));
-    render(<OverviewPage />);
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
     expect(screen.getByText(/Total Transactions/i)).toBeInTheDocument();
     expect(screen.getByText(/Income/i)).toBeInTheDocument();
@@ -54,7 +68,11 @@ describe("OverviewPage", () => {
     server.use(
       http.get("/api/overview", () => HttpResponse.json({ ...OVERVIEW_DATA, savings_rate: null }))
     );
-    render(<OverviewPage />);
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
     expect(screen.getByText("—")).toBeInTheDocument();
   });
@@ -65,7 +83,11 @@ describe("OverviewPage", () => {
         HttpResponse.json({ detail: "Server error" }, { status: 500 })
       )
     );
-    render(<OverviewPage />);
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
     await screen.findByText(/API 500/);
   });
 });

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listCardHolders, updateCardHolder } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { CardHolderFilters } from "../api/client";
 import type { CardHolderItem } from "../types";
 
@@ -318,7 +319,10 @@ export default function CardHoldersPage() {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Card Holders</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-gray-900">Card Holders</h1>
+          <HelpIcon section="card-holders" />
+        </div>
       </div>
 
       {/* Filter bar */}

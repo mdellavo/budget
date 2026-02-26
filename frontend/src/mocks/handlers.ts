@@ -28,6 +28,7 @@ export const handlers = [
       savings_rate: null,
       expense_breakdown: [],
       sankey: { income_sources: [], expense_categories: [] },
+      budget_warnings: [],
     })
   ),
   http.get("/api/recurring", () => HttpResponse.json({ items: [] })),
@@ -36,4 +37,14 @@ export const handlers = [
     HttpResponse.json({ items: [], has_more: false, next_cursor: null })
   ),
   http.get("/api/category-trends", () => HttpResponse.json({ items: [] })),
+  http.get("/api/budgets", () => HttpResponse.json({ items: [], month: "2024-01" })),
+  http.get("/api/categories/all", () => HttpResponse.json({ items: [] })),
+  http.get("/api/budgets/wizard", () =>
+    HttpResponse.json({ items: [], avg_monthly_income: "0", months_analyzed: 0 })
+  ),
+  http.post("/api/budgets/batch", () =>
+    HttpResponse.json({ created: 0, skipped: 0 }, { status: 201 })
+  ),
+  http.patch("/api/categories/:id", () => HttpResponse.json({ id: 1, classification: null })),
+  http.patch("/api/subcategories/:id", () => HttpResponse.json({ id: 1, classification: null })),
 ];

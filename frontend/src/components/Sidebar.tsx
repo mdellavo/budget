@@ -5,6 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: "📊" },
+  { to: "/budgets", label: "Budgets", icon: "💰" },
   { to: "/transactions", label: "Transactions", icon: "↕" },
   { to: "/accounts", label: "Accounts", icon: "🏦" },
   { to: "/merchants", label: "Merchants", icon: "🏪" },
@@ -14,6 +15,7 @@ const NAV = [
   { to: "/recurring", label: "Recurring", icon: "🔁" },
   { to: "/monthly", label: "Monthly", icon: "📅" },
   { to: "/trends", label: "Trends", icon: "📈" },
+  { to: "/help", label: "Help", icon: "❓" },
 ];
 
 export default function Sidebar() {

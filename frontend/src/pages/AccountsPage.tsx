@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listAccounts } from "../api/client";
+import HelpIcon from "../components/HelpIcon";
 import type { AccountFilters } from "../api/client";
 import type { AccountItem } from "../types";
 
@@ -122,7 +123,10 @@ export default function AccountsPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-6">Accounts</h1>
+      <div className="flex items-center gap-2 mb-6">
+        <h1 className="text-2xl font-semibold text-gray-900">Accounts</h1>
+        <HelpIcon section="accounts" />
+      </div>
 
       {/* Filter bar */}
       <form

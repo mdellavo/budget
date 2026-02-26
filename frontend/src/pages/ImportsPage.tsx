@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
+import HelpIcon from "../components/HelpIcon";
 import {
   listImports,
   importCsv,
@@ -269,7 +270,10 @@ export default function ImportsPage() {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Imports</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-gray-900">Imports</h1>
+          <HelpIcon section="imports" />
+        </div>
         <button
           onClick={() => setShowImportForm((f) => !f)}
           className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
