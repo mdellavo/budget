@@ -151,6 +151,7 @@ export async function getMerchant(id: number): Promise<MerchantItem> {
 export interface MerchantUpdateBody {
   name: string;
   location: string | null;
+  website: string | null;
 }
 
 export async function updateMerchant(id: number, body: MerchantUpdateBody): Promise<MerchantItem> {
@@ -241,8 +242,19 @@ export async function listImports(filters: ImportFilters = {}): Promise<ImportsR
   );
 }
 
-export async function getOverview(): Promise<OverviewData> {
-  return handleResponse<OverviewData>(await fetch(`${BASE}/overview`, { headers: authHeaders() }));
+export interface OverviewFilters {
+  date_from?: string;
+  date_to?: string;
+}
+
+export async function getOverview(filters: OverviewFilters = {}): Promise<OverviewData> {
+  const params = new URLSearchParams();
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  const qs = params.toString();
+  return handleResponse<OverviewData>(
+    await fetch(`${BASE}/overview${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
 }
 
 export async function getRecurring(): Promise<RecurringData> {

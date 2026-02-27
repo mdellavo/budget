@@ -16,6 +16,7 @@ const OVERVIEW_DATA = {
   expenses: "-3200.00",
   net: "1800.00",
   savings_rate: 36.0,
+  income_breakdown: [],
   expense_breakdown: [],
   sankey: { income_sources: [], expense_categories: [] },
   budget_warnings: [],
@@ -57,11 +58,11 @@ describe("OverviewPage", () => {
       </MemoryRouter>
     );
     await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
-    expect(screen.getByText(/Total Transactions/i)).toBeInTheDocument();
-    expect(screen.getByText(/Income/i)).toBeInTheDocument();
-    expect(screen.getByText(/Expenses/i)).toBeInTheDocument();
-    expect(screen.getByText(/Net Change/i)).toBeInTheDocument();
-    expect(screen.getByText(/Savings Rate/i)).toBeInTheDocument();
+    expect(screen.getByText("Total Transactions")).toBeInTheDocument();
+    expect(screen.getByText("Income")).toBeInTheDocument();
+    expect(screen.getByText("Expenses")).toBeInTheDocument();
+    expect(screen.getByText("Net Change")).toBeInTheDocument();
+    expect(screen.getByText("Savings Rate")).toBeInTheDocument();
   });
 
   it("shows '—' when savings_rate is null", async () => {

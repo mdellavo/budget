@@ -17,6 +17,7 @@ const RECURRING_ITEM = {
   merchant: "Netflix",
   merchant_id: 1,
   category: "Entertainment",
+  subcategory: "Streaming",
   amount: "-15.99",
   frequency: "monthly",
   occurrences: 12,
@@ -35,8 +36,8 @@ describe("RecurringPage", () => {
     server.use(http.get("/api/recurring", () => HttpResponse.json({ items: [RECURRING_ITEM] })));
     renderPage();
     expect(await screen.findByText("Netflix")).toBeInTheDocument();
-    expect(screen.getByText("Entertainment")).toBeInTheDocument();
-    expect(screen.getByText("Monthly")).toBeInTheDocument();
+    expect(screen.getAllByText("Entertainment").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Monthly").length).toBeGreaterThan(0);
     expect(screen.getByText("12")).toBeInTheDocument();
   });
 

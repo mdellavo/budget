@@ -403,10 +403,14 @@ export default function CategoriesPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Categories</h1>
         <HelpIcon section="categories" />
       </div>
+      <p className="text-sm text-gray-500 mb-6">
+        Spending broken down by category and subcategory. Set Need/Want classification for the
+        Budget Wizard.
+      </p>
 
       {/* Filter bar */}
       <form

@@ -989,6 +989,7 @@ export default function BudgetPage() {
             <HelpIcon section="budgets" />
           </div>
           <p className="text-sm text-gray-500 mt-0.5">
+            Monthly spending limits —{" "}
             {new Date(month + "-02").toLocaleString("default", { month: "long", year: "numeric" })}
           </p>
         </div>

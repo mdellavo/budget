@@ -26,6 +26,7 @@ export const handlers = [
       expenses: "0",
       net: "0",
       savings_rate: null,
+      income_breakdown: [],
       expense_breakdown: [],
       sankey: { income_sources: [], expense_categories: [] },
       budget_warnings: [],

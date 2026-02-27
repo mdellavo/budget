@@ -27,6 +27,7 @@ export interface TransactionItem {
   account_id: number;
   account: string;
   merchant: string | null;
+  merchant_website: string | null;
   category: string | null;
   subcategory: string | null;
   notes: string | null;
@@ -67,6 +68,7 @@ export interface MerchantItem {
   id: number;
   name: string;
   location: string | null;
+  website: string | null;
   transaction_count: number;
   total_amount: string;
 }
@@ -147,7 +149,9 @@ export interface ImportProgress {
 export interface RecurringItem {
   merchant: string;
   merchant_id: number | null;
+  website: string | null;
   category: string | null;
+  subcategory: string | null;
   amount: string; // median absolute value, positive
   frequency: "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";
   occurrences: number;
@@ -255,6 +259,7 @@ export interface OverviewData {
   expenses: string;
   net: string;
   savings_rate: number | null;
+  income_breakdown: SankeyNode[];
   expense_breakdown: SankeyNode[];
   sankey: {
     income_sources: SankeyNode[];

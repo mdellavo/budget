@@ -27,7 +27,7 @@ describe("HelpPage", () => {
     expect(screen.getByRole("heading", { name: "Card Holders" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Categories/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Importing Transactions" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Recurring Transactions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recurring Charges" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Monthly Reports" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Category Trends" })).toBeInTheDocument();
   });

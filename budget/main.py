@@ -241,6 +241,11 @@ async def lifespan(app: FastAPI):
             pass
 
         try:
+            await conn.execute(text("ALTER TABLE merchants ADD COLUMN website TEXT"))
+        except Exception:
+            pass  # column already exists
+
+        try:
             await conn.execute(
                 text(
                     """
@@ -521,6 +526,7 @@ async def _run_enrichment(
 
                 mname = r.get("merchant_name")
                 mlocation = r.get("merchant_location")
+                mwebsite = r.get("merchant_website")
                 cname = r.get("category")
                 need_want = r.get("need_want")
                 scname = r.get("subcategory")
@@ -529,7 +535,7 @@ async def _run_enrichment(
                 merchant_id = None
                 if mname:
                     merchant_id = await mq.find_or_create_for_enrichment(
-                        mname, mlocation, merchant_cache
+                        mname, mlocation, merchant_cache, mwebsite
                     )
 
                 category_id = None
@@ -658,7 +664,9 @@ async def get_recurring(
             {
                 "merchant": rep.merchant_name or rep.description,
                 "merchant_id": rep.merchant_id,
+                "website": rep.merchant_website,
                 "category": rep.category_name,
+                "subcategory": rep.subcategory_name,
                 "amount": str(round(median_amount, 2)),
                 "frequency": frequency,
                 "occurrences": len(txns),
@@ -733,11 +741,13 @@ async def get_monthly_report(
 
 @app.get("/overview")
 async def get_overview(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     aq = AnalyticsQueries(db, user_id=current_user.id)
-    summary = await aq.get_overview_summary()
+    summary = await aq.get_overview_summary(date_from, date_to)
     transaction_count = summary["transaction_count"]
     net = summary["net"]
     income = summary["income"]
@@ -745,7 +755,7 @@ async def get_overview(
     savings_rate = float(net / income * 100) if income > 0 else None
 
     # --- sankey: income by merchant ---
-    income_rows = await aq.get_income_by_merchant()
+    income_rows = await aq.get_income_by_merchant(date_from, date_to)
 
     # top 8 income sources; collapse rest into "Other Income"
     TOP_INCOME = 8
@@ -757,7 +767,7 @@ async def get_overview(
         income_sources.append({"name": "Other Income", "amount": str(other_income)})
 
     # --- sankey: expenses by category ---
-    expense_rows = await aq.get_expenses_by_category()
+    expense_rows = await aq.get_expenses_by_category(date_from, date_to)
 
     # top 14 expense categories; collapse rest into "Other Expenses"
     TOP_EXPENSES = 14
@@ -773,6 +783,14 @@ async def get_overview(
         {"name": r.name, "amount": str(r.total)}
         for r in expense_rows
         if float(r.total) < 0
+    ]
+
+    # --- income by category ---
+    income_cat_rows = await aq.get_income_by_category(date_from, date_to)
+    income_breakdown = [
+        {"name": r.name, "amount": str(r.total)}
+        for r in income_cat_rows
+        if float(r.total) > 0
     ]
 
     # --- budget warnings ---
@@ -794,6 +812,7 @@ async def get_overview(
         "expenses": str(expenses),
         "net": str(net),
         "savings_rate": savings_rate,
+        "income_breakdown": income_breakdown,
         "expense_breakdown": expense_breakdown,
         "sankey": {
             "income_sources": income_sources,
@@ -851,6 +870,7 @@ async def list_merchants(
                 "id": r.id,
                 "name": r.name,
                 "location": r.location,
+                "website": r.website,
                 "transaction_count": r.transaction_count,
                 "total_amount": str(r.total_amount),
             }
@@ -866,6 +886,7 @@ def _merchant_row(merchant: Merchant, transaction_count: int, total_amount) -> d
         "id": merchant.id,
         "name": merchant.name,
         "location": merchant.location,
+        "website": merchant.website,
         "transaction_count": transaction_count,
         "total_amount": str(total_amount),
     }
@@ -888,6 +909,7 @@ async def get_merchant(
 class MerchantUpdate(BaseModel):
     name: str
     location: str | None
+    website: str | None = None
 
 
 @app.patch("/merchants/{merchant_id}")
@@ -901,7 +923,7 @@ async def update_merchant(
     merchant = await mq.get_by_id(merchant_id)
     if merchant is None:
         raise HTTPException(status_code=404, detail="Merchant not found")
-    await mq.update(merchant, body.name, body.location)
+    await mq.update(merchant, body.name, body.location, body.website)
     await db.commit()
     await db.refresh(merchant)
     transaction_count, total_amount = await mq.get_stats(merchant_id)
@@ -1160,7 +1182,10 @@ async def _run_reenrichment_for_import(
                 mname = r.get("merchant_name")
                 if mname:
                     tx.merchant_id = await mq.find_or_create_for_enrichment(
-                        mname, r.get("merchant_location"), merchant_cache
+                        mname,
+                        r.get("merchant_location"),
+                        merchant_cache,
+                        r.get("merchant_website"),
                     )
                 else:
                     tx.merchant_id = None
@@ -1418,6 +1443,7 @@ async def list_transactions(
                 "account_id": tx.account_id,
                 "account": tx.account.name,
                 "merchant": tx.merchant.name if tx.merchant else None,
+                "merchant_website": tx.merchant.website if tx.merchant else None,
                 "category": tx.subcategory.category.name if tx.subcategory else None,
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
@@ -1507,6 +1533,7 @@ async def update_transaction(
         "account_id": tx.account_id,
         "account": tx.account.name,
         "merchant": tx.merchant.name if tx.merchant else None,
+        "merchant_website": tx.merchant.website if tx.merchant else None,
         "category": tx.subcategory.category.name if tx.subcategory else None,
         "subcategory": tx.subcategory.name if tx.subcategory else None,
         "notes": tx.notes,
@@ -1565,9 +1592,10 @@ async def re_enrich_transactions(
 
         mname = r.get("merchant_name")
         mlocation = r.get("merchant_location")
+        mwebsite = r.get("merchant_website")
         if mname:
             tx.merchant_id = await mq.find_or_create_for_enrichment(
-                mname, mlocation, merchant_cache
+                mname, mlocation, merchant_cache, mwebsite
             )
         else:
             tx.merchant_id = None
@@ -1608,6 +1636,7 @@ async def re_enrich_transactions(
                 "account_id": tx.account_id,
                 "account": tx.account.name,
                 "merchant": tx.merchant.name if tx.merchant else None,
+                "merchant_website": tx.merchant.website if tx.merchant else None,
                 "category": tx.subcategory.category.name if tx.subcategory else None,
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,

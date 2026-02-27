@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listMerchants, updateMerchant } from "../api/client";
 import HelpIcon from "../components/HelpIcon";
+import MerchantLogo from "../components/MerchantLogo";
 import type { MerchantFilters } from "../api/client";
 import type { MerchantItem } from "../types";
 
@@ -50,7 +51,10 @@ function DetailsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">{merchant.name}</h2>
+          <div className="flex items-center gap-3">
+            <MerchantLogo website={merchant.website} name={merchant.name} size={40} />
+            <h2 className="text-lg font-semibold text-gray-900">{merchant.name}</h2>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 ml-4 text-xl leading-none"
@@ -64,6 +68,23 @@ function DetailsModal({
             <dt className="text-gray-500">Location</dt>
             <dd className="text-gray-800">
               {merchant.location ?? <span className="text-gray-400 italic">none</span>}
+            </dd>
+          </div>
+          <div className="flex justify-between">
+            <dt className="text-gray-500">Website</dt>
+            <dd className="text-gray-800">
+              {merchant.website ? (
+                <a
+                  href={`https://${merchant.website}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-600 hover:underline"
+                >
+                  {merchant.website}
+                </a>
+              ) : (
+                <span className="text-gray-400 italic">none</span>
+              )}
             </dd>
           </div>
           <div className="flex justify-between">
@@ -112,6 +133,7 @@ function EditModal({
 }) {
   const [name, setName] = useState(merchant.name);
   const [location, setLocation] = useState(merchant.location ?? "");
+  const [website, setWebsite] = useState(merchant.website ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,6 +146,7 @@ function EditModal({
       const updated = await updateMerchant(merchant.id, {
         name: name.trim(),
         location: location.trim() || null,
+        website: website.trim() || null,
       });
       onSaved(updated);
     } catch (err) {
@@ -170,6 +193,16 @@ function EditModal({
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="none"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 font-medium mb-1">Website</label>
+            <input
+              type="text"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              placeholder="e.g. amazon.com"
               className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -301,9 +334,14 @@ export default function MerchantsPage() {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold text-gray-900">Merchants</h1>
-          <HelpIcon section="merchants" />
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-gray-900">Merchants</h1>
+            <HelpIcon section="merchants" />
+          </div>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Merchants detected from your transactions. Edit names or merge duplicates.
+          </p>
         </div>
         <Link
           to="/merchants/merge"
@@ -425,12 +463,15 @@ export default function MerchantsPage() {
                 return (
                   <tr key={row.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2 text-gray-800">
-                      <button
-                        onClick={() => setDetailsMerchant(row)}
-                        className="text-indigo-600 hover:underline text-left"
-                      >
-                        {row.name}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <MerchantLogo website={row.website} name={row.name} />
+                        <button
+                          onClick={() => setDetailsMerchant(row)}
+                          className="text-indigo-600 hover:underline text-left"
+                        >
+                          {row.name}
+                        </button>
+                      </div>
                       {row.location && (
                         <div className="text-xs text-gray-400 mt-0.5">{row.location}</div>
                       )}

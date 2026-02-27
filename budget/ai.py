@@ -108,6 +108,7 @@ Entertainment: Movies & Theater, Events & Concerts, Games, Hobbies
 Travel: Flights, Hotels & Lodging, Car Rental, Vacation Packages, Travel Insurance
 Loans & Debt: Credit Card Payment, Personal Loan, Auto Loan, Medical Debt
 Financial: Bank Fees, ATM Fees, Investment & Brokerage, Taxes, Wire & Transfer Fees
+Cash & ATM: ATM Withdrawal
 Government & Fees: Taxes, DMV & Registration, Fines & Penalties, Postage & Shipping
 Giving: Charitable Donations, Gifts, Religious & Tithing
 Income: Paycheck, Freelance & Side Income, Reimbursement, Refund, Interest & Dividends, Transfer In
@@ -140,11 +141,17 @@ Rules:
   e.g. "POS PURCHASE CARD 1234 STARBUCKS" → "1234"
   e.g. "ACH DEBIT CARD5678 NETFLIX" → "5678"
   e.g. "STARBUCKS #4821" → null
+- merchant_website: the primary domain of the merchant (e.g. "netflix.com", "homedepot.com"). Bare domain only — no https:// or www. If unknown, set to null.
 - description: a short, human-readable summary of the transaction, Title Case
   Strip noise (store numbers, location codes, transaction IDs). If the raw description is already clean, keep it.
   e.g. "STARBUCKS #4821 SEATTLE WA" → "Starbucks Coffee"
   e.g. "SQ *FARMERS MARKET 123" → "Farmers Market"
   e.g. "GITHUB.COM/SPONSORS" → "GitHub Sponsors"
+- ATM withdrawals vs ATM fees: descriptions containing "WITHDRAWAL" or "CASH WITHDRAWAL" are cash
+  taken out → Cash & ATM / ATM Withdrawal. Descriptions containing "FEE", "CHARGE", or
+  "TRANSACTION FEE" related to ATM usage are bank charges → Financial / ATM Fees.
+  e.g. "NON-WF ATM WITHDRAWAL" → Cash & ATM / ATM Withdrawal
+  e.g. "NON-WELLS FARGO ATM TRANSACTION FEE" → Financial / ATM Fees
 - Positive amounts are typically income/credits; negative amounts are expenses.
 - If a merchant cannot be identified, set merchant_name to null.
 - subcategory must be one of the values listed under the chosen category above.
@@ -168,6 +175,7 @@ ENRICHMENT_SCHEMA = {
                     "index": {"type": "integer"},
                     "merchant_name": {"type": ["string", "null"]},
                     "merchant_location": {"type": ["string", "null"]},
+                    "merchant_website": {"type": ["string", "null"]},
                     "is_recurring": {"type": "boolean"},
                     "description": {"type": "string"},
                     "category": {"type": ["string", "null"]},
@@ -191,6 +199,7 @@ ENRICHMENT_SCHEMA = {
                     "index",
                     "merchant_name",
                     "merchant_location",
+                    "merchant_website",
                     "is_recurring",
                     "description",
                     "category",

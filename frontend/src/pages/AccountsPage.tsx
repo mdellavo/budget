@@ -123,10 +123,11 @@ export default function AccountsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Accounts</h1>
         <HelpIcon section="accounts" />
       </div>
+      <p className="text-sm text-gray-500 mb-6">All bank accounts imported into the app.</p>
 
       {/* Filter bar */}
       <form

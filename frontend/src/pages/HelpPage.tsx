@@ -26,6 +26,26 @@ export default function HelpPage() {
             </a>
           </li>
           <li>
+            <a href="#categories" className="hover:underline">
+              Categories &amp; Classification
+            </a>
+          </li>
+          <li>
+            <a href="#monthly" className="hover:underline">
+              Monthly Reports
+            </a>
+          </li>
+          <li>
+            <a href="#recurring" className="hover:underline">
+              Recurring Charges
+            </a>
+          </li>
+          <li>
+            <a href="#trends" className="hover:underline">
+              Category Trends
+            </a>
+          </li>
+          <li>
             <a href="#accounts" className="hover:underline">
               Accounts
             </a>
@@ -41,28 +61,8 @@ export default function HelpPage() {
             </a>
           </li>
           <li>
-            <a href="#categories" className="hover:underline">
-              Categories &amp; Classification
-            </a>
-          </li>
-          <li>
             <a href="#imports" className="hover:underline">
               Importing Transactions
-            </a>
-          </li>
-          <li>
-            <a href="#recurring" className="hover:underline">
-              Recurring Transactions
-            </a>
-          </li>
-          <li>
-            <a href="#monthly" className="hover:underline">
-              Monthly Reports
-            </a>
-          </li>
-          <li>
-            <a href="#trends" className="hover:underline">
-              Category Trends
             </a>
           </li>
         </ol>
@@ -74,26 +74,69 @@ export default function HelpPage() {
           <h2 className="text-xl font-semibold text-gray-900 mb-3">Overview</h2>
           <div className="prose prose-sm text-gray-600 space-y-2">
             <p>
-              The Overview page gives you a snapshot of your finances across all accounts and time
-              periods.
+              A high-level snapshot of your income, expenses, and savings. Every number, chart, and
+              table on this page reflects the selected date window.
             </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Date filter</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Stat cards</strong> — total income, total expenses, net (income minus
-                expenses), and savings rate.
+                <strong>All time / Month to date / Year to date</strong> — one-click presets that
+                instantly scope all stats, charts, and tables to the chosen window.
               </li>
               <li>
-                <strong>Budget alerts</strong> — any active budgets that have exceeded their limit
-                are highlighted here.
+                <strong>From / To dropdowns</strong> — pick any start and end month for a custom
+                range. Selecting a custom range deselects the active preset.
               </li>
               <li>
-                <strong>Sankey diagram</strong> — a flow chart showing how money moves from income
-                sources through expense categories into savings.
+                The selected filter is stored in the URL, so the browser back button restores it
+                after navigating away.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Stat cards</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Total Transactions</strong>, <strong>Income</strong>,{" "}
+                <strong>Expenses</strong>, <strong>Net Change</strong>, and{" "}
+                <strong>Savings Rate</strong> — all scoped to the selected date window.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Budget alerts</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Shown only when the <em>Month to date</em> preset is active. Lists any budgets that
+                are approaching or over their monthly limit, with a direct link to the relevant
+                transactions.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Money Flow (Sankey)</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Flows from income sources on the left, through the total income pool in the middle,
+                to expense categories and savings on the right. Band width is proportional to dollar
+                amount.
               </li>
               <li>
-                <strong>Spending donut</strong> — a proportional breakdown of spending across top
-                categories.
+                <strong>Click any node</strong> to jump to Transactions filtered to that income
+                source or expense category.
               </li>
+              <li>Hover over any band or node to see exact amounts and percentages.</li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">
+              Spending by Category (donut)
+            </h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Proportional breakdown of all expense categories for the selected period.</li>
+              <li>
+                <strong>Click any slice</strong> to jump to Transactions filtered to that category.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Breakdown tables</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Income by Category</strong> and <strong>Expenses by Category</strong> tables
+                list each category with its total for the selected period.
+              </li>
+              <li>Click any category name to jump to its transactions.</li>
             </ul>
           </div>
         </section>
@@ -106,27 +149,44 @@ export default function HelpPage() {
             <ul className="list-disc list-inside space-y-1">
               <li>
                 <strong>Budget cards</strong> — each card shows the category or subcategory, the
-                monthly limit, amount spent so far, a progress bar, and a severity badge (on track /
-                warning / over budget).
+                monthly limit, amount spent so far, a progress bar, the percentage used, and a
+                severity badge (on track / approaching / over budget).
+              </li>
+              <li>
+                <strong>Forecast</strong> — projects end-of-month spend at the current daily rate,
+                shown as a secondary percentage on each card.
+              </li>
+              <li>
+                <strong>Need/Want badge</strong> — each card shows whether the category is
+                classified as a Need or a Want (set on the Categories page).
+              </li>
+              <li>
+                <strong>Historical chart</strong> — shows spending for that category over the past 6
+                months alongside the budget limit, so you can see whether this month is typical.
               </li>
               <li>
                 <strong>Add budget</strong> — create a budget scoped to a full category or a
                 specific subcategory, and set the monthly limit.
               </li>
               <li>
-                <strong>Budget Wizard</strong> — automatically generates budget suggestions. Choose
-                between <em>Custom</em> mode (based on your own historical spending over a selected
-                look-back period) or <em>50/30/20</em> mode (allocates income using the 50/30/20
-                rule, driven by the Need/Want classification on each category). Suggestions can be
-                reviewed and edited before batch creation.
+                <strong>Edit / Delete</strong> — update the limit or remove a budget at any time.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Budget Wizard</h3>
+            <p>Automatically generates budget suggestions based on your spending history.</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Custom mode</strong> — suggests limits based on your own average monthly
+                spending over a configurable look-back period (e.g. last 3 or 6 months).
               </li>
               <li>
-                <strong>Need/Want badges</strong> — each budget card shows whether the category is
-                classified as a Need or a Want (set on the Categories page).
+                <strong>50/30/20 mode</strong> — allocates income across Needs (50%), Wants (30%),
+                and Savings (20%) using the Need/Want classification on each category. Requires
+                categories to be classified first.
               </li>
               <li>
-                <strong>Historical chart</strong> — shows spending for that category over the past 6
-                months alongside the budget limit.
+                Review and adjust every suggestion before creating them. Already-budgeted categories
+                are skipped automatically.
               </li>
             </ul>
           </div>
@@ -137,111 +197,53 @@ export default function HelpPage() {
           <h2 className="text-xl font-semibold text-gray-900 mb-3">Transactions</h2>
           <div className="prose prose-sm text-gray-600 space-y-2">
             <p>Browse, filter, edit, and re-enrich every transaction in the database.</p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Filtering</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Sorting</strong> — click any column header (Date, Description, Merchant,
-                Category, Amount, Account) to sort ascending or descending.
-              </li>
-              <li>
-                <strong>Filter panel</strong> — filter by date range, merchant, description, min/max
-                amount, category, subcategory, account, recurring flag, and cardholder.
+                <strong>Filter bar</strong> — filter by date range, merchant, description, min/max
+                amount, category, subcategory, account, import source, recurring flag, uncategorized
+                flag, and cardholder. Autocomplete is available for merchant, category, subcategory,
+                account, and cardholder fields.
               </li>
               <li>
                 <strong>Natural-language search</strong> — type a plain-English query (e.g. "coffee
-                shops last month") and Claude will translate it into filter parameters
-                automatically.
+                shops last month" or "subscriptions over $10") and Claude translates it into filter
+                parameters automatically.
               </li>
-              <li>
-                <strong>Inline edit</strong> — click any transaction row to edit the merchant,
-                category, subcategory, notes, and cardholder directly.
-              </li>
-              <li>
-                <strong>Re-enrich</strong> — sends selected transactions back to Claude for fresh
-                merchant/category detection.
-              </li>
-              <li>
-                <strong>Bulk actions</strong> — select multiple rows to re-enrich or update
-                categories in bulk.
-              </li>
-              <li>
-                <strong>Load more</strong> — transactions are paginated; click "Load more" to fetch
-                the next page.
-              </li>
+              <li>All active filters are stored in the URL for easy sharing and bookmarking.</li>
             </ul>
-          </div>
-        </section>
-
-        {/* Accounts */}
-        <section id="accounts">
-          <h2 className="text-xl font-semibold text-gray-900 mb-3">Accounts</h2>
-          <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>View all bank accounts that have been imported.</p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Sorting</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Account list</strong> — shows account name, institution, type (chequing,
-                savings, credit, etc.), and the number of transactions imported.
-              </li>
-              <li>
-                <strong>Filter &amp; sort</strong> — filter accounts by name, institution, or type;
-                sort by any column.
-              </li>
-              <li>
-                <strong>Drill down</strong> — click an account name to open Transactions filtered to
-                that account.
+                Click any column header (Date, Description, Merchant, Category, Amount, Account) to
+                sort ascending or descending.
               </li>
             </ul>
-          </div>
-        </section>
-
-        {/* Merchants */}
-        <section id="merchants">
-          <h2 className="text-xl font-semibold text-gray-900 mb-3">
-            Merchants &amp; Deduplication
-          </h2>
-          <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>
-              Merchants are detected and normalised by Claude during import. This page lets you view
-              and edit them.
-            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Editing</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Merchant list</strong> — name, location, transaction count, and total spend.
-                Click a row to open a detail modal.
+                <strong>Inline edit</strong> — click any transaction row to edit it directly:
+                merchant (with live autocomplete), category, subcategory, description, notes, and
+                cardholder. Clearing a field removes the association.
               </li>
               <li>
-                <strong>Edit</strong> — rename a merchant or change its location from the detail
-                modal.
-              </li>
-              <li>
-                <strong>Merge duplicates</strong> — Claude scans all merchants and returns groups of
-                likely duplicates (e.g. "Starbucks" and "STARBUCKS #123"). For each group you can
-                set a canonical name and merge, or skip the group. Merchants with the same name but
-                different locations are kept separate.
+                New merchant and category names are created automatically on save (find-or-create).
               </li>
             </ul>
-          </div>
-        </section>
-
-        {/* Card Holders */}
-        <section id="card-holders">
-          <h2 className="text-xl font-semibold text-gray-900 mb-3">Card Holders</h2>
-          <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>Track multiple cardholders on shared accounts.</p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Bulk actions</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Cardholder list</strong> — shows each cardholder by name and the last 4
-                digits of their card number, along with transaction count and total spend.
+                <strong>Re-enrich</strong> — select one or more rows and send them back to Claude
+                for fresh merchant and category detection.
               </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Other</h3>
+            <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Filter</strong> — filter by last 4 digits or cardholder name.
+                Merchant logos are shown next to merchant names in the table (requires a logo.dev
+                token in your environment).
               </li>
-              <li>
-                <strong>Edit label</strong> — assign a friendly name to a card number.
-              </li>
-              <li>
-                <strong>Drill down</strong> — click a cardholder to view their transactions in the
-                Transactions page.
-              </li>
+              <li>Transactions are paginated; click "Load more" to fetch the next page.</li>
             </ul>
           </div>
         </section>
@@ -258,77 +260,18 @@ export default function HelpPage() {
                 <strong>Date filter</strong> — narrow the breakdown to a custom date range.
               </li>
               <li>
-                <strong>Need/Want toggle</strong> — each category and subcategory can be classified
-                as a <em>Need</em> (essential spending) or a <em>Want</em> (discretionary). This
-                classification is used by the Budget Wizard's 50/30/20 mode.
+                <strong>Category cards</strong> — each card shows the category name, total spending,
+                a donut chart of subcategory proportions, and a sortable subcategory table (sort by
+                total, transaction count, or name).
               </li>
               <li>
-                <strong>Donut charts</strong> — each category has a donut chart showing
-                subcategory-level proportions.
+                <strong>Need/Want toggle</strong> — classify each category and subcategory as a{" "}
+                <em>Need</em> (essential spending) or a <em>Want</em> (discretionary). This
+                classification drives the Budget Wizard's 50/30/20 mode.
               </li>
               <li>
-                <strong>Drill down</strong> — click a category or subcategory to see its
+                <strong>Drill down</strong> — click a category or subcategory name to view its
                 transactions.
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        {/* Imports */}
-        <section id="imports">
-          <h2 className="text-xl font-semibold text-gray-900 mb-3">Importing Transactions</h2>
-          <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>Import transactions from a CSV file exported from your bank.</p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>
-                <strong>Upload CSV</strong> — provide the account name, account type, and choose
-                your CSV file. Claude automatically detects which columns map to date, description,
-                and amount.
-              </li>
-              <li>
-                <strong>Background enrichment</strong> — after import, Claude processes transactions
-                in batches to assign merchants, categories, subcategories, and recurring flags. A
-                progress bar shows completion.
-              </li>
-              <li>
-                <strong>Re-enrich</strong> — run enrichment again on an existing import if you want
-                Claude to re-classify transactions (e.g. after updating merchant or category data).
-              </li>
-              <li>
-                <strong>Abort</strong> — cancel an in-progress enrichment job.
-              </li>
-              <li>
-                <strong>Import history</strong> — all previous imports are listed with their status,
-                row count, and date.
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        {/* Recurring */}
-        <section id="recurring">
-          <h2 className="text-xl font-semibold text-gray-900 mb-3">Recurring Transactions</h2>
-          <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>
-              Claude automatically detects recurring charges (subscriptions, bills, etc.) during
-              enrichment.
-            </p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>
-                <strong>Frequency</strong> — each recurring item shows how often it charges (weekly,
-                monthly, quarterly, etc.).
-              </li>
-              <li>
-                <strong>Monthly cost</strong> — normalized to a monthly equivalent for easy
-                comparison.
-              </li>
-              <li>
-                <strong>Next expected date</strong> — predicted next charge based on the detected
-                frequency.
-              </li>
-              <li>
-                <strong>Overdue</strong> — items past their expected date are highlighted so you can
-                check whether the charge appeared.
               </li>
             </ul>
           </div>
@@ -341,21 +284,57 @@ export default function HelpPage() {
             <p>Detailed breakdown of income and spending for a single calendar month.</p>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Month selector</strong> — pick any month from the sidebar; the report
-                updates instantly.
+                <strong>Month selector</strong> — pick any month from the sidebar (grouped by year);
+                the report updates instantly. Loads the most recent month on first visit.
               </li>
               <li>
                 <strong>Stat cards</strong> — income, expenses, net, and savings rate for the
-                selected month.
+                selected month, plus a link to all transactions in that month.
               </li>
               <li>
-                <strong>Sunburst chart</strong> — interactive chart with categories on the inner
-                ring and subcategories on the outer ring. Click a segment to zoom in.
+                <strong>Sunburst chart</strong> — hierarchical spending visualization with
+                categories on the inner ring and subcategories on the outer ring. Click a segment to
+                zoom in; click the centre to zoom back out.
               </li>
               <li>
-                <strong>Nested table</strong> — categories and subcategories with totals, each
-                linking to the Transactions page pre-filtered to that category and month.
+                <strong>Category table</strong> — nested category and subcategory rows with totals.
+                Click any name to open Transactions filtered to that category and month.
               </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Recurring */}
+        <section id="recurring">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Recurring Charges</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              Claude automatically detects recurring charges (subscriptions, bills, etc.) during
+              enrichment based on transaction history.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Summary cards</strong> — total monthly cost, quarterly cost, annual cost,
+                and subscription count across all detected recurring items.
+              </li>
+              <li>
+                <strong>Category breakdown</strong> — aggregated recurring spend grouped by category
+                and subcategory.
+              </li>
+              <li>
+                <strong>Detail table</strong> — merchant (with logo), category, typical amount,
+                frequency (weekly / biweekly / monthly / quarterly / annual), monthly equivalent
+                cost, occurrence count, last charge date, and estimated next charge date.
+              </li>
+              <li>
+                <strong>Overdue detection</strong> — if the estimated next charge date has passed,
+                it is shown in bold red so you can check whether the charge appeared.
+              </li>
+              <li>
+                <strong>Sort</strong> — sort by merchant, category, amount, frequency, monthly cost,
+                occurrences, last charge, or next charge.
+              </li>
+              <li>Click a merchant name to view all of its transactions.</li>
             </ul>
           </div>
         </section>
@@ -364,19 +343,156 @@ export default function HelpPage() {
         <section id="trends">
           <h2 className="text-xl font-semibold text-gray-900 mb-3">Category Trends</h2>
           <div className="prose prose-sm text-gray-600 space-y-2">
-            <p>Visualise how spending in each category changes over time.</p>
+            <p>Visualize how spending in each category changes month over month.</p>
             <ul className="list-disc list-inside space-y-1">
               <li>
-                <strong>Date range</strong> — choose a start and end month to define the window.
+                <strong>Date range</strong> — choose a start and end month with the From/To pickers,
+                then click Apply. The selected range is saved in the URL.
               </li>
               <li>
-                <strong>Multi-line chart</strong> — one line per category, showing monthly totals
-                over the selected range.
+                <strong>Multi-line chart</strong> — one line per expense category, showing monthly
+                totals over the selected range. Hover over any point to see the exact amount.
               </li>
               <li>
-                <strong>Spot trends</strong> — useful for identifying categories where spending is
-                growing or shrinking over time.
+                Useful for spotting categories where spending is growing or shrinking over time.
               </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Accounts */}
+        <section id="accounts">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Accounts</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>View all bank and credit card accounts that have been imported.</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Account list</strong> — shows account name, institution, type (checking,
+                savings, credit card, etc.), date created, transaction count, and total amount.
+              </li>
+              <li>
+                <strong>Filter &amp; sort</strong> — filter by name, institution, or type; sort by
+                any column.
+              </li>
+              <li>
+                <strong>Drill down</strong> — click an account name to open Transactions filtered to
+                that account.
+              </li>
+              <li>If no accounts exist yet, a link to the Imports page is shown.</li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Merchants */}
+        <section id="merchants">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">
+            Merchants &amp; Deduplication
+          </h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              Merchants are detected and normalized by Claude during import. This page lets you
+              view, edit, and merge them.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Merchant list</strong> — logo, name, location, transaction count, and total
+                spend. Filter by name or location; sort by any column.
+              </li>
+              <li>
+                <strong>Edit</strong> — click a merchant row to open the detail modal; edit the
+                name, location, and website URL.
+              </li>
+              <li>
+                <strong>View transactions</strong> — each detail modal links to Transactions
+                filtered to that merchant.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Merge Duplicates</h3>
+            <p>
+              Claude scans all merchant names and returns groups of likely duplicates (e.g.
+              "Starbucks" and "STARBUCKS #0423").
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>For each group, set a canonical name and click Merge, or skip the group.</li>
+              <li>
+                All transactions from the merged merchants are reassigned to the canonical merchant.
+              </li>
+              <li>Merchants with the same name but different locations are kept separate.</li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Card Holders */}
+        <section id="card-holders">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Card Holders</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              Track spending by individual cardholder on shared accounts. Card holder data is
+              detected from your CSV if the bank includes it.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Cardholder list</strong> — shows last 4 digits of the card number, the
+                assigned name (if any), transaction count, and total spend.
+              </li>
+              <li>
+                <strong>Assign a name</strong> — click the edit icon to assign a friendly name to a
+                card number (e.g. "Alice" for card ending in 1234).
+              </li>
+              <li>
+                <strong>Filter</strong> — filter by last 4 digits or cardholder name.
+              </li>
+              <li>
+                <strong>Drill down</strong> — click a cardholder row to view their transactions in
+                the Transactions page.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Imports */}
+        <section id="imports">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Importing Transactions</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>Import transactions from a CSV file exported from your bank or credit card.</p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Uploading a file</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Enter an account name (required), optionally select the account type (checking,
+                savings, credit card, investment, cash), and choose your CSV file.
+              </li>
+              <li>
+                Claude automatically detects which columns map to date, description, and amount — no
+                manual column mapping needed.
+              </li>
+              <li>
+                Transactions are deduplicated against existing data for the same account, so
+                re-importing an overlapping CSV is safe.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Background enrichment</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                After upload, Claude processes transactions in batches to assign merchants,
+                categories, subcategories, and recurring flags.
+              </li>
+              <li>A progress bar shows how many rows have been enriched out of the total.</li>
+              <li>
+                <strong>Abort</strong> — cancel an in-progress enrichment job; already-enriched rows
+                are kept.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Import history</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                All imports are listed with filename, account, date, row count, transaction count,
+                and status (complete / in-progress / aborted).
+              </li>
+              <li>
+                <strong>Re-enrich</strong> — run enrichment again on a completed import to
+                re-classify its transactions (e.g. after updating category or merchant data).
+              </li>
+              <li>Click the transaction count to view that import's transactions.</li>
             </ul>
           </div>
         </section>

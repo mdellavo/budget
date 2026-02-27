@@ -319,9 +319,14 @@ export default function CardHoldersPage() {
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold text-gray-900">Card Holders</h1>
-          <HelpIcon section="card-holders" />
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-gray-900">Card Holders</h1>
+            <HelpIcon section="card-holders" />
+          </div>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Track spending by individual cardholder on shared accounts.
+          </p>
         </div>
       </div>
 

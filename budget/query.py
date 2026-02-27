@@ -39,7 +39,9 @@ class AnalyticsQueries:
                 Transaction.merchant_id,
                 Transaction.description,
                 Merchant.name.label("merchant_name"),
+                Merchant.website.label("merchant_website"),
                 Category.name.label("category_name"),
+                Subcategory.name.label("subcategory_name"),
             )
             .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
             .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
@@ -131,20 +133,31 @@ class AnalyticsQueries:
             stmt = stmt.where(month_col <= date_to)
         return (await self.db.execute(stmt)).all()
 
-    async def get_overview_summary(self) -> dict:
+    async def get_overview_summary(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict:
         user_filters = self._user_filter()
+        date_filters = []
+        if date_from:
+            date_filters.append(Transaction.date >= date_from)
+        if date_to:
+            date_filters.append(Transaction.date <= date_to)
         transaction_count = (
             await self.db.scalar(
-                select(func.count(Transaction.id)).where(*user_filters)
+                select(func.count(Transaction.id)).where(*user_filters, *date_filters)
             )
             or 0
         )
         net = await self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(*user_filters)
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                *user_filters, *date_filters
+            )
         ) or Decimal(0)
         income = await self.db.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                Transaction.amount > 0, *user_filters
+                Transaction.amount > 0, *user_filters, *date_filters
             )
         ) or Decimal(0)
         expenses = net - income
@@ -155,7 +168,16 @@ class AnalyticsQueries:
             "expenses": expenses,
         }
 
-    async def get_income_by_merchant(self) -> list:
+    async def get_income_by_merchant(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list:
+        date_filters = []
+        if date_from:
+            date_filters.append(Transaction.date >= date_from)
+        if date_to:
+            date_filters.append(Transaction.date <= date_to)
         rows = (
             await self.db.execute(
                 select(
@@ -164,14 +186,23 @@ class AnalyticsQueries:
                 )
                 .select_from(Transaction)
                 .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
-                .where(Transaction.amount > 0, *self._user_filter())
+                .where(Transaction.amount > 0, *self._user_filter(), *date_filters)
                 .group_by(Merchant.name)
                 .order_by(func.sum(Transaction.amount).desc())
             )
         ).all()
         return rows
 
-    async def get_expenses_by_category(self) -> list:
+    async def get_income_by_category(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list:
+        date_filters = []
+        if date_from:
+            date_filters.append(Transaction.date >= date_from)
+        if date_to:
+            date_filters.append(Transaction.date <= date_to)
         rows = (
             await self.db.execute(
                 select(
@@ -181,7 +212,33 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(Transaction.amount < 0, *self._user_filter())
+                .where(Transaction.amount > 0, *self._user_filter(), *date_filters)
+                .group_by(Category.name)
+                .order_by(func.sum(Transaction.amount).desc())
+            )
+        ).all()
+        return rows
+
+    async def get_expenses_by_category(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list:
+        date_filters = []
+        if date_from:
+            date_filters.append(Transaction.date >= date_from)
+        if date_to:
+            date_filters.append(Transaction.date <= date_to)
+        rows = (
+            await self.db.execute(
+                select(
+                    func.coalesce(Category.name, "Uncategorized").label("name"),
+                    func.sum(Transaction.amount).label("total"),
+                )
+                .select_from(Transaction)
+                .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .outerjoin(Category, Subcategory.category_id == Category.id)
+                .where(Transaction.amount < 0, *self._user_filter(), *date_filters)
                 .group_by(Category.name)
                 .order_by(func.sum(Transaction.amount))
             )
@@ -904,6 +961,7 @@ class MerchantQueries:
                     Merchant.id,
                     Merchant.name,
                     Merchant.location,
+                    Merchant.website,
                     txn_count_expr.label("transaction_count"),
                     txn_total_expr.label("total_amount"),
                 )
@@ -918,9 +976,16 @@ class MerchantQueries:
         next_cursor = items[-1].id if has_more and items else None
         return items, has_more, next_cursor
 
-    async def update(self, merchant: Merchant, name: str, location: str | None) -> None:
+    async def update(
+        self,
+        merchant: Merchant,
+        name: str,
+        location: str | None,
+        website: str | None = None,
+    ) -> None:
         merchant.name = name
         merchant.location = location
+        merchant.website = website
 
     async def list_for_duplicate_detection(self) -> list:
         txn_count_expr = (
@@ -976,6 +1041,7 @@ class MerchantQueries:
         name: str,
         location: str | None,
         cache: dict[str, tuple[int, bool]],
+        website: str | None = None,
     ) -> int:
         if name not in cache:
             stmt = select(Merchant).where(Merchant.name == name)
@@ -984,13 +1050,21 @@ class MerchantQueries:
             res = await self.db.execute(stmt)
             m = res.scalar_one_or_none()
             if m is None:
-                m = Merchant(name=name, location=location, user_id=self.user_id)
+                m = Merchant(
+                    name=name, location=location, website=website, user_id=self.user_id
+                )
                 self.db.add(m)
                 await self.db.flush()
                 cache[name] = (m.id, location is not None)
             else:
+                updates: dict = {}
                 if m.location is None and location is not None:
                     m.location = location
+                    updates["location"] = location
+                if m.website is None and website is not None:
+                    m.website = website
+                    updates["website"] = website
+                if updates:
                     await self.db.flush()
                 cache[name] = (m.id, m.location is not None)
         else:

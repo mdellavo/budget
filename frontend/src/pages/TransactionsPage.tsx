@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import HelpIcon from "../components/HelpIcon";
+import MerchantLogo from "../components/MerchantLogo";
 import {
   listTransactions,
   listMerchants,
@@ -1071,7 +1072,7 @@ export default function TransactionsPage() {
         />
       )}
 
-      <div className="flex items-baseline gap-3 mb-6">
+      <div className="flex items-baseline gap-3 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Transactions</h1>
         <HelpIcon section="transactions" />
         {totalCount !== null && (
@@ -1080,6 +1081,9 @@ export default function TransactionsPage() {
           </span>
         )}
       </div>
+      <p className="text-sm text-gray-500 mb-6">
+        Browse, search, and edit all imported transactions.
+      </p>
 
       {/* Natural language query bar */}
       <form onSubmit={handleNlSubmit} className="mb-4">
@@ -1425,7 +1429,18 @@ export default function TransactionsPage() {
                       )}
                     </td>
                     <td className="px-4 py-2 text-gray-600">
-                      {row.merchant ?? <span className="text-gray-300">—</span>}
+                      {row.merchant ? (
+                        <div className="flex items-center gap-1.5">
+                          <MerchantLogo
+                            website={row.merchant_website}
+                            name={row.merchant}
+                            size={16}
+                          />
+                          {row.merchant}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-gray-600">
                       {category || <span className="text-gray-300">—</span>}
