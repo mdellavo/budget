@@ -853,7 +853,7 @@ function NeedsWantsPieChart({ needLimit, wantLimit, savings, income }: NeedsWant
     Plotly.react(divRef.current, data, layout, { responsive: true, displayModeBar: false });
   }, [needLimit, wantLimit, savings, income]);
 
-  return <div ref={divRef} style={{ width: "100%", height: 260 }} />;
+  return <div ref={divRef} style={{ width: 240, height: 240 }} />;
 }
 
 interface HistoricalChartProps {
@@ -1171,7 +1171,7 @@ export default function BudgetPage() {
             <>
               {hasClassified && (
                 <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
-                  <div className="grid grid-cols-[auto_1fr] gap-x-6 items-center">
+                  <div className="grid grid-cols-[240px_1fr] gap-x-6 items-center">
                     <NeedsWantsPieChart
                       needLimit={needLimit}
                       wantLimit={wantLimit}
