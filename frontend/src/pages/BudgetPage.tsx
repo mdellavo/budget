@@ -9,6 +9,7 @@ import {
   deleteBudget,
   getBudgetWizard,
   createBudgetsBatch,
+  getOverview,
 } from "../api/client";
 import type {
   BudgetItem,
@@ -786,6 +787,75 @@ function WizardSection({
   );
 }
 
+interface NeedsWantsPieChartProps {
+  needLimit: number;
+  wantLimit: number;
+  savings: number;
+  income: number;
+}
+
+function NeedsWantsPieChart({ needLimit, wantLimit, savings, income }: NeedsWantsPieChartProps) {
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!divRef.current) return;
+    const labels: string[] = [];
+    const values: number[] = [];
+    const colors: string[] = [];
+
+    if (needLimit > 0) {
+      labels.push("Needs");
+      values.push(needLimit);
+      colors.push("#6366f1");
+    }
+    if (wantLimit > 0) {
+      labels.push("Wants");
+      values.push(wantLimit);
+      colors.push("#f59e0b");
+    }
+    if (savings > 0) {
+      labels.push("Savings");
+      values.push(savings);
+      colors.push("#10b981");
+    }
+    if (values.length === 0) return;
+
+    const data: Data[] = [
+      {
+        type: "pie",
+        labels,
+        values,
+        marker: { colors },
+        hole: 0.5,
+        textinfo: "label+percent",
+        hoverinfo: "label+value+percent",
+        textfont: { size: 13 },
+      } as Data,
+    ];
+    const layout: Partial<Layout> = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      margin: { l: 10, r: 10, t: 10, b: 10 },
+      showlegend: false,
+      annotations:
+        income > 0
+          ? [
+              {
+                text: `<b>${formatCurrency(String(income))}</b><br>income`,
+                x: 0.5,
+                y: 0.5,
+                font: { size: 13, color: "#374151" },
+                showarrow: false,
+              },
+            ]
+          : [],
+    };
+
+    Plotly.react(divRef.current, data, layout, { responsive: true, displayModeBar: false });
+  }, [needLimit, wantLimit, savings, income]);
+
+  return <div ref={divRef} style={{ width: "100%", height: 260 }} />;
+}
+
 interface HistoricalChartProps {
   budgets: BudgetItem[];
   months: string[];
@@ -876,6 +946,7 @@ export default function BudgetPage() {
   const [subcategoryClassificationMap, setSubcategoryClassificationMap] = useState<
     Record<number, CategoryClassification>
   >({});
+  const [monthIncome, setMonthIncome] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -891,9 +962,15 @@ export default function BudgetPage() {
     setLoading(true);
     setError(null);
     try {
-      const [budgetRes, catRes] = await Promise.all([listBudgets(m), listAllCategories()]);
+      const { date_from, date_to } = monthDateRange(m);
+      const [budgetRes, catRes, overviewRes] = await Promise.all([
+        listBudgets(m),
+        listAllCategories(),
+        getOverview({ date_from, date_to }),
+      ]);
       setBudgets(budgetRes.items);
       setCategoryOptions(catRes.items);
+      setMonthIncome(Math.max(0, parseFloat(overviewRes.income)));
       // Build category_id → classification map (deduplicated)
       const cmap: Record<number, CategoryClassification> = {};
       for (const opt of catRes.items) {
@@ -1088,41 +1165,78 @@ export default function BudgetPage() {
             .filter((b) => getClassification(b) === "want")
             .reduce((sum, b) => sum + parseFloat(b.amount_limit), 0);
           const hasClassified = needLimit > 0 || wantLimit > 0;
+          const savings = Math.max(0, monthIncome - needLimit - wantLimit);
 
           return (
             <>
               {hasClassified && (
-                <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 space-y-2">
-                  {needLimit > 0 && (
-                    <div className="flex items-center gap-3">
-                      <span className="w-12 text-xs font-medium text-indigo-700">Needs</span>
-                      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-indigo-500 rounded-full"
-                          style={{ width: `${Math.min((needSpent / needLimit) * 100, 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-500 whitespace-nowrap">
-                        {formatCurrency(String(needSpent))} / {formatCurrency(String(needLimit))} (
-                        {Math.round((needSpent / needLimit) * 100)}%)
-                      </span>
+                <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+                  <div className="grid grid-cols-[auto_1fr] gap-x-6 items-center">
+                    <NeedsWantsPieChart
+                      needLimit={needLimit}
+                      wantLimit={wantLimit}
+                      savings={savings}
+                      income={monthIncome}
+                    />
+                    <div className="space-y-3 pr-4">
+                      {needLimit > 0 && (
+                        <div className="flex items-center gap-3">
+                          <span className="w-3 h-3 rounded-full bg-indigo-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                              <span>Needs</span>
+                              <span>{formatCurrency(String(needLimit))}</span>
+                            </div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-indigo-500 rounded-full"
+                                style={{
+                                  width: `${Math.min((needSpent / needLimit) * 100, 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5 text-right">
+                              {formatCurrency(String(needSpent))} spent
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {wantLimit > 0 && (
+                        <div className="flex items-center gap-3">
+                          <span className="w-3 h-3 rounded-full bg-amber-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                              <span>Wants</span>
+                              <span>{formatCurrency(String(wantLimit))}</span>
+                            </div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-amber-400 rounded-full"
+                                style={{
+                                  width: `${Math.min((wantSpent / wantLimit) * 100, 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5 text-right">
+                              {formatCurrency(String(wantSpent))} spent
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {savings > 0 && (
+                        <div className="flex items-center gap-3">
+                          <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between text-sm font-medium text-gray-700">
+                              <span>Savings</span>
+                              <span>{formatCurrency(String(savings))}</span>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">Unbudgeted income</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {wantLimit > 0 && (
-                    <div className="flex items-center gap-3">
-                      <span className="w-12 text-xs font-medium text-amber-700">Wants</span>
-                      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-amber-400 rounded-full"
-                          style={{ width: `${Math.min((wantSpent / wantLimit) * 100, 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-500 whitespace-nowrap">
-                        {formatCurrency(String(wantSpent))} / {formatCurrency(String(wantLimit))} (
-                        {Math.round((wantSpent / wantLimit) * 100)}%)
-                      </span>
-                    </div>
-                  )}
+                  </div>
                 </div>
               )}
               <div className="space-y-4">

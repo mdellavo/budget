@@ -42,6 +42,7 @@ export interface TransactionsResponse {
   has_more: boolean;
   next_cursor: number | null;
   total_count: number;
+  total_amount: string;
 }
 
 export interface ColumnMapping {

@@ -106,13 +106,24 @@ Home: Rent, Mortgage, Furniture & Decor, Home Services & Repairs, Home Insurance
 Education & Childcare: Tuition & Fees, Daycare & Childcare, School Supplies, Student Loans
 Entertainment: Movies & Theater, Events & Concerts, Games, Hobbies
 Travel: Flights, Hotels & Lodging, Car Rental, Vacation Packages, Travel Insurance
-Loans & Debt: Credit Card Payment, Personal Loan, Auto Loan, Medical Debt
+Loans & Debt: Personal Loan, Auto Loan, Medical Debt
 Financial: Bank Fees, ATM Fees, Investment & Brokerage, Taxes, Wire & Transfer Fees
 Cash & ATM: ATM Withdrawal
 Government & Fees: Taxes, DMV & Registration, Fines & Penalties, Postage & Shipping
 Giving: Charitable Donations, Gifts, Religious & Tithing
-Income: Paycheck, Freelance & Side Income, Reimbursement, Refund, Interest & Dividends, Transfer In
+Income: Paycheck, Freelance & Side Income, Reimbursement, Refund, Interest & Dividends
+Transfer: Credit Card Payment, Internal Transfer, Investment Contribution, Investment Withdrawal
 Other: Anything that doesn't fit the above categories
+
+Transfers (excluded from income/expense totals — use for money moving between your own accounts):
+- Payment FROM a bank account TO a credit card → Transfer / Credit Card Payment
+  e.g. "AUTOPAY PAYMENT", "CHASE CREDIT CRD AUTOPAY", "ONLINE PAYMENT THANK YOU"
+- Credit received ON a credit card from a payment → Transfer / Credit Card Payment
+  e.g. "PAYMENT THANK YOU", "MOBILE PAYMENT - THANK YOU"
+- Bank-to-bank or checking-to-savings moves → Transfer / Internal Transfer
+  e.g. "TRANSFER TO SAVINGS", "ZELLE TRANSFER TO", "ACH TRANSFER"
+- Brokerage contributions/withdrawals → Transfer / Investment Contribution or Withdrawal
+  e.g. "FIDELITY CONTRIBUTION", "VANGUARD TRANSFER IN"
 
 Rules:
 - merchant_name: canonical business name, Title Case, no location codes or store numbers

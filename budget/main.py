@@ -1425,7 +1425,10 @@ async def list_transactions(
         uncategorized=uncategorized,
         cardholder=cardholder,
     )
-    total_count = await txq.count(conditions)
+    total_count, total_amount = await asyncio.gather(
+        txq.count(conditions),
+        txq.sum(conditions),
+    )
     items, has_more, next_cursor = await txq.list(
         conditions,
         sort_by=sort_by,
@@ -1457,6 +1460,7 @@ async def list_transactions(
         "has_more": has_more,
         "next_cursor": next_cursor,
         "total_count": total_count,
+        "total_amount": str(total_amount),
     }
 
 

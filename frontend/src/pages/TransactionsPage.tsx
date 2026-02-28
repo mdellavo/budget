@@ -784,6 +784,7 @@ export default function TransactionsPage() {
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [totalAmount, setTotalAmount] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -835,6 +836,7 @@ export default function TransactionsPage() {
       setNextCursor(null);
       setHasMore(false);
       setTotalCount(null);
+      setTotalAmount(null);
       try {
         const res = await listTransactions({
           ...toApiFilters(formFilters),
@@ -845,6 +847,7 @@ export default function TransactionsPage() {
         setNextCursor(res.next_cursor);
         setHasMore(res.has_more);
         setTotalCount(res.total_count);
+        setTotalAmount(res.total_amount);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load transactions");
       } finally {
@@ -1078,6 +1081,17 @@ export default function TransactionsPage() {
         {totalCount !== null && (
           <span className="text-sm text-gray-500">
             {totalCount.toLocaleString()} {totalCount === 1 ? "transaction" : "transactions"}
+            {totalAmount !== null && (
+              <>
+                {" · "}
+                <span className={parseFloat(totalAmount) >= 0 ? "text-green-600" : "text-gray-500"}>
+                  {new Intl.NumberFormat("en-US", {
+                    style: "currency",
+                    currency: "USD",
+                  }).format(parseFloat(totalAmount))}
+                </span>
+              </>
+            )}
           </span>
         )}
       </div>

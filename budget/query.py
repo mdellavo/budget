@@ -31,6 +31,12 @@ class AnalyticsQueries:
             return [Transaction.user_id == self.user_id]
         return []
 
+    def _transfer_cat_subq(self):
+        stmt = select(Category.id).where(Category.name == "Transfer")
+        if self.user_id is not None:
+            stmt = stmt.where(Category.user_id == self.user_id)
+        return stmt.scalar_subquery()
+
     async def get_recurring_transactions(self) -> list:
         stmt = (
             select(
@@ -65,6 +71,10 @@ class AnalyticsQueries:
     async def get_month_stats(self, month: str) -> dict:
         month_filter = func.strftime("%Y-%m", Transaction.date) == month
         user_filters = self._user_filter()
+        transfer_filter = or_(
+            Subcategory.category_id.is_(None),
+            ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+        )
         transaction_count = (
             await self.db.scalar(
                 select(func.count(Transaction.id)).where(month_filter, *user_filters)
@@ -72,14 +82,16 @@ class AnalyticsQueries:
             or 0
         )
         income = await self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                month_filter, Transaction.amount > 0, *user_filters
-            )
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(month_filter, Transaction.amount > 0, *user_filters, transfer_filter)
         ) or Decimal(0)
         expenses = await self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                month_filter, Transaction.amount < 0, *user_filters
-            )
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(month_filter, Transaction.amount < 0, *user_filters, transfer_filter)
         ) or Decimal(0)
         return {
             "transaction_count": transaction_count,
@@ -101,7 +113,15 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(month_filter, Transaction.amount < 0, *self._user_filter())
+                .where(
+                    month_filter,
+                    Transaction.amount < 0,
+                    *self._user_filter(),
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
                 .group_by(Category.name, Subcategory.name)
                 .order_by(func.sum(Transaction.amount).asc())
             )
@@ -123,7 +143,14 @@ class AnalyticsQueries:
             .select_from(Transaction)
             .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
             .outerjoin(Category, Subcategory.category_id == Category.id)
-            .where(Transaction.amount < 0, *self._user_filter())
+            .where(
+                Transaction.amount < 0,
+                *self._user_filter(),
+                or_(
+                    Subcategory.category_id.is_(None),
+                    ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                ),
+            )
             .group_by(month_col, Category.name)
             .order_by(month_col, Category.name)
         )
@@ -144,6 +171,10 @@ class AnalyticsQueries:
             date_filters.append(Transaction.date >= date_from)
         if date_to:
             date_filters.append(Transaction.date <= date_to)
+        transfer_filter = or_(
+            Subcategory.category_id.is_(None),
+            ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+        )
         transaction_count = (
             await self.db.scalar(
                 select(func.count(Transaction.id)).where(*user_filters, *date_filters)
@@ -156,11 +187,21 @@ class AnalyticsQueries:
             )
         ) or Decimal(0)
         income = await self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                Transaction.amount > 0, *user_filters, *date_filters
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(
+                Transaction.amount > 0, *user_filters, *date_filters, transfer_filter
             )
         ) or Decimal(0)
-        expenses = net - income
+        expenses = await self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(
+                Transaction.amount < 0, *user_filters, *date_filters, transfer_filter
+            )
+        ) or Decimal(0)
         return {
             "transaction_count": transaction_count,
             "net": net,
@@ -186,7 +227,16 @@ class AnalyticsQueries:
                 )
                 .select_from(Transaction)
                 .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
-                .where(Transaction.amount > 0, *self._user_filter(), *date_filters)
+                .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .where(
+                    Transaction.amount > 0,
+                    *self._user_filter(),
+                    *date_filters,
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
                 .group_by(Merchant.name)
                 .order_by(func.sum(Transaction.amount).desc())
             )
@@ -212,7 +262,15 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(Transaction.amount > 0, *self._user_filter(), *date_filters)
+                .where(
+                    Transaction.amount > 0,
+                    *self._user_filter(),
+                    *date_filters,
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
                 .group_by(Category.name)
                 .order_by(func.sum(Transaction.amount).desc())
             )
@@ -238,7 +296,15 @@ class AnalyticsQueries:
                 .select_from(Transaction)
                 .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
                 .outerjoin(Category, Subcategory.category_id == Category.id)
-                .where(Transaction.amount < 0, *self._user_filter(), *date_filters)
+                .where(
+                    Transaction.amount < 0,
+                    *self._user_filter(),
+                    *date_filters,
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
                 .group_by(Category.name)
                 .order_by(func.sum(Transaction.amount))
             )
@@ -1156,6 +1222,11 @@ class TransactionQueries:
             await self.db.scalar(select(func.count(Transaction.id)).where(*conditions))
             or 0
         )
+
+    async def sum(self, conditions: list) -> Decimal:
+        return await self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0)).where(*conditions)
+        ) or Decimal(0)
 
     async def list(
         self,
