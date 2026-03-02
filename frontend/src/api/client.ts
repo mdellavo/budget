@@ -19,6 +19,8 @@ import type {
   TransactionItem,
   TransactionsResponse,
   WizardResponse,
+  YearListResponse,
+  YearlyReport,
 } from "../types";
 
 const BASE = "/api";
@@ -114,6 +116,7 @@ export interface TransactionFilters {
   is_recurring?: boolean;
   uncategorized?: boolean;
   cardholder?: string;
+  tag?: string;
   after?: number;
   limit?: number;
   sort_by?: "date" | "amount" | "description" | "merchant" | "category" | "account";
@@ -275,6 +278,18 @@ export async function getMonthlyReport(month: string): Promise<MonthlyReport> {
   );
 }
 
+export async function listYears(): Promise<YearListResponse> {
+  return handleResponse<YearListResponse>(
+    await fetch(`${BASE}/yearly`, { headers: authHeaders() })
+  );
+}
+
+export async function getYearlyReport(year: string): Promise<YearlyReport> {
+  return handleResponse<YearlyReport>(
+    await fetch(`${BASE}/yearly/${year}`, { headers: authHeaders() })
+  );
+}
+
 export async function getImportProgress(importId: number): Promise<ImportProgress> {
   return handleResponse<ImportProgress>(
     await fetch(`${BASE}/imports/${importId}/progress`, { headers: authHeaders() })
@@ -343,6 +358,7 @@ export interface TransactionUpdateBody {
   subcategory: string | null;
   notes: string | null;
   card_number?: string | null;
+  tags?: string[];
 }
 
 export async function updateTransaction(
@@ -584,4 +600,8 @@ export async function createBudgetsBatch(items: BatchBudgetItem[]): Promise<Batc
       body: JSON.stringify({ items }),
     })
   );
+}
+
+export async function fetchTags(): Promise<{ items: string[] }> {
+  return handleResponse(await fetch(`${BASE}/tags`, { headers: authHeaders() }));
 }

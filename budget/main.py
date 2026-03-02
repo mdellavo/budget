@@ -268,6 +268,25 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _build_category_breakdown(rows: list) -> list[dict]:
+    """Build a category→subcategory tree from flat (category, subcategory, total) rows."""
+    cat_totals: dict[str, Decimal] = defaultdict(Decimal)
+    cat_subs: dict[str, list] = defaultdict(list)
+    for r in rows:
+        cat_totals[r.category] += r.total
+        cat_subs[r.category].append(
+            {"subcategory": r.subcategory, "total": str(r.total)}
+        )
+    return [
+        {
+            "category": cat,
+            "total": str(cat_totals[cat]),
+            "subcategories": sorted(cat_subs[cat], key=lambda x: Decimal(x["total"])),
+        }
+        for cat in sorted(cat_totals, key=lambda c: cat_totals[c])
+    ]
+
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -609,12 +628,12 @@ FREQUENCY_RANGES = [
     ("quarterly", 60, 120),
     ("annual", 300, 400),
 ]
-MONTHLY_FACTORS = {
-    "weekly": 52 / 12,
-    "biweekly": 26 / 12,
-    "monthly": 1,
-    "quarterly": 1 / 3,
-    "annual": 1 / 12,
+MONTHLY_FACTORS: dict[str, Decimal] = {
+    "weekly": Decimal(52) / Decimal(12),
+    "biweekly": Decimal(26) / Decimal(12),
+    "monthly": Decimal(1),
+    "quarterly": Decimal(1) / Decimal(3),
+    "annual": Decimal(1) / Decimal(12),
 }
 
 
@@ -654,7 +673,7 @@ async def get_recurring(
         if frequency is None:
             continue
 
-        amounts = [abs(float(t.amount)) for t in txns]
+        amounts = [abs(t.amount) for t in txns]
         median_amount = _median(amounts)
         monthly_cost = median_amount * MONTHLY_FACTORS[frequency]
         next_estimated = dates[-1] + timedelta(days=round(median_gap))
@@ -667,16 +686,16 @@ async def get_recurring(
                 "website": rep.merchant_website,
                 "category": rep.category_name,
                 "subcategory": rep.subcategory_name,
-                "amount": str(round(median_amount, 2)),
+                "amount": str(median_amount.quantize(Decimal("0.01"))),
                 "frequency": frequency,
                 "occurrences": len(txns),
                 "last_charge": dates[-1].isoformat(),
                 "next_estimated": next_estimated.isoformat(),
-                "monthly_cost": str(round(monthly_cost, 2)),
+                "monthly_cost": str(monthly_cost.quantize(Decimal("0.01"))),
             }
         )
 
-    results.sort(key=lambda x: float(x["monthly_cost"]), reverse=True)
+    results.sort(key=lambda x: Decimal(x["monthly_cost"]), reverse=True)
     return {"items": results}
 
 
@@ -703,28 +722,7 @@ async def get_monthly_report(
     net = income + expenses  # expenses is negative
     savings_rate = float(net / income * 100) if income > 0 else None
 
-    # Category + subcategory breakdown for expenses
     rows = await aq.get_category_breakdown(month)
-
-    # Build category → subcategory tree
-    cat_totals: dict[str, Decimal] = defaultdict(Decimal)
-    cat_subs: dict[str, list] = defaultdict(list)
-    for r in rows:
-        cat_totals[r.category] += r.total
-        cat_subs[r.category].append(
-            {"subcategory": r.subcategory, "total": str(r.total)}
-        )
-
-    category_breakdown = [
-        {
-            "category": cat,
-            "total": str(cat_totals[cat]),
-            "subcategories": sorted(cat_subs[cat], key=lambda x: float(x["total"])),
-        }
-        for cat in sorted(
-            cat_totals, key=lambda c: float(cat_totals[c])
-        )  # most negative first
-    ]
 
     return {
         "month": month,
@@ -735,7 +733,45 @@ async def get_monthly_report(
             "net": str(net),
             "savings_rate": savings_rate,
         },
-        "category_breakdown": category_breakdown,
+        "category_breakdown": _build_category_breakdown(rows),
+    }
+
+
+@app.get("/yearly")
+async def list_years(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    years = await AnalyticsQueries(db, user_id=current_user.id).list_years()
+    return {"years": years}
+
+
+@app.get("/yearly/{year}")
+async def get_yearly_report(
+    year: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    stats, rows = await asyncio.gather(
+        aq.get_year_stats(year),
+        aq.get_year_category_breakdown(year),
+    )
+    income = stats["income"]
+    expenses = stats["expenses"]
+    net = income + expenses
+    savings_rate = float(net / income * 100) if income > 0 else None
+
+    return {
+        "year": year,
+        "summary": {
+            "transaction_count": stats["transaction_count"],
+            "income": str(income),
+            "expenses": str(expenses),
+            "net": str(net),
+            "savings_rate": savings_rate,
+        },
+        "category_breakdown": _build_category_breakdown(rows),
     }
 
 
@@ -1397,6 +1433,9 @@ async def list_transactions(
         None,
         description="Case-insensitive substring match on card number or cardholder name",
     ),
+    tag: str | None = Query(
+        None, description="Filter by tag name (exact, case-insensitive)"
+    ),
     after: int | None = Query(
         None,
         description="Cursor: last seen transaction ID (from previous response's next_cursor)",
@@ -1424,6 +1463,7 @@ async def list_transactions(
         is_recurring=is_recurring,
         uncategorized=uncategorized,
         cardholder=cardholder,
+        tag=tag,
     )
     total_count, total_amount = await asyncio.gather(
         txq.count(conditions),
@@ -1454,6 +1494,7 @@ async def list_transactions(
                 "raw_description": tx.raw_description,
                 "cardholder_name": tx.cardholder.name if tx.cardholder else None,
                 "card_number": tx.cardholder.card_number if tx.cardholder else None,
+                "tags": [t.name for t in tx.tags],
             }
             for tx in items
         ],
@@ -1476,6 +1517,7 @@ class TransactionUpdate(BaseModel):
     subcategory: str | None  # None = clear subcategory
     notes: str | None  # None = clear notes
     card_number: str | None = None  # None = clear cardholder
+    tags: list[str] = []
 
 
 @app.patch("/transactions/{transaction_id}")
@@ -1523,6 +1565,9 @@ async def update_transaction(
     else:
         tx.cardholder_id = None
 
+    # Tags
+    await txq.set_transaction_tags(tx, body.tags)
+
     await db.commit()
     db.expire(tx)
     tx = await txq.get_by_id(transaction_id)
@@ -1545,6 +1590,7 @@ async def update_transaction(
         "raw_description": tx.raw_description,
         "cardholder_name": tx.cardholder.name if tx.cardholder else None,
         "card_number": tx.cardholder.card_number if tx.cardholder else None,
+        "tags": [t.name for t in tx.tags],
     }
 
 
@@ -1652,6 +1698,16 @@ async def re_enrich_transactions(
             for tx in updated
         ]
     }
+
+
+@app.get("/tags")
+async def list_tags(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    txq = TransactionQueries(db, user_id=current_user.id)
+    tags = await txq.list_all_tags()
+    return {"items": [t.name for t in tags]}
 
 
 class ParseQueryRequest(BaseModel):

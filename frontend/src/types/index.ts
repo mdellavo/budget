@@ -35,6 +35,7 @@ export interface TransactionItem {
   raw_description: string | null;
   cardholder_name: string | null;
   card_number: string | null;
+  tags: string[];
 }
 
 export interface TransactionsResponse {
@@ -182,6 +183,22 @@ export interface CategoryBreakdown {
 
 export interface MonthlyReport {
   month: string;
+  summary: {
+    transaction_count: number;
+    income: string;
+    expenses: string;
+    net: string;
+    savings_rate: number | null;
+  };
+  category_breakdown: CategoryBreakdown[];
+}
+
+export interface YearListResponse {
+  years: string[];
+}
+
+export interface YearlyReport {
+  year: string;
   summary: {
     transaction_count: number;
     income: string;

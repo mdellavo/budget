@@ -11,6 +11,7 @@ import MerchantMergePage from "./pages/MerchantMergePage";
 import ImportsPage from "./pages/ImportsPage";
 import RecurringPage from "./pages/RecurringPage";
 import MonthlyPage from "./pages/MonthlyPage";
+import YearlyPage from "./pages/YearlyPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import CardHoldersPage from "./pages/CardHoldersPage";
 import TrendPage from "./pages/TrendPage";
@@ -40,6 +41,7 @@ export default function App() {
                       <Route path="/imports" element={<ImportsPage />} />
                       <Route path="/recurring" element={<RecurringPage />} />
                       <Route path="/monthly" element={<MonthlyPage />} />
+                      <Route path="/yearly" element={<YearlyPage />} />
                       <Route path="/categories" element={<CategoriesPage />} />
                       <Route path="/cardholders" element={<CardHoldersPage />} />
                       <Route path="/trends" element={<TrendPage />} />

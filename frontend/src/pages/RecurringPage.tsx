@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getRecurring } from "../api/client";
 import HelpIcon from "../components/HelpIcon";
 import MerchantLogo from "../components/MerchantLogo";
+import { parseAmount } from "../lib/format";
 import type { RecurringItem } from "../types";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -45,7 +46,7 @@ function compareValues(a: RecurringItem, b: RecurringItem, key: SortKey): number
   if (av === null) return 1;
   if (bv === null) return -1;
   if (key === "amount" || key === "monthly_cost") {
-    return Math.abs(parseFloat(av as string)) - Math.abs(parseFloat(bv as string));
+    return Math.abs(parseAmount(av as string)) - Math.abs(parseAmount(bv as string));
   }
   if (typeof av === "number" && typeof bv === "number") return av - bv;
   return String(av).localeCompare(String(bv));
@@ -84,7 +85,7 @@ export default function RecurringPage() {
 
   const summary = useMemo(() => {
     if (!items || items.length === 0) return null;
-    const monthly = items.reduce((sum, item) => sum + parseFloat(item.monthly_cost), 0);
+    const monthly = items.reduce((sum, item) => sum + parseAmount(item.monthly_cost), 0);
     return { count: items.length, monthly, quarterly: monthly * 3, annual: monthly * 12 };
   }, [items]);
 
@@ -97,7 +98,7 @@ export default function RecurringPage() {
     for (const item of items) {
       const cat = item.category ?? "Uncategorized";
       const sub = item.subcategory ?? "—";
-      const cost = parseFloat(item.monthly_cost);
+      const cost = parseAmount(item.monthly_cost);
       if (!catMap.has(cat)) catMap.set(cat, { monthly: 0, count: 0, subs: new Map() });
       const catEntry = catMap.get(cat)!;
       catEntry.monthly += cost;

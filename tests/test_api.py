@@ -1654,3 +1654,384 @@ class TestAuthRequired:
             "/accounts", headers={"Authorization": f"Bearer {token}"}
         )
         assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Yearly analytics
+# ---------------------------------------------------------------------------
+
+
+class TestYearly:
+    async def test_list_years_empty(self, client):
+        r = await client.get("/yearly")
+        assert r.status_code == 200
+        assert r.json() == {"years": []}
+
+    async def test_list_years(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2023, 6, 1))
+        await make_transaction(acct.id, txn_date=date(2024, 3, 15))
+        r = await client.get("/yearly")
+        assert r.status_code == 200
+        years = r.json()["years"]
+        assert "2023" in years
+        assert "2024" in years
+        # Most recent year first
+        assert years.index("2024") < years.index("2023")
+
+    async def test_get_yearly_report(self, client, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("5000.00"), txn_date=date(2024, 1, 10)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-1200.00"), txn_date=date(2024, 6, 15)
+        )
+        r = await client.get("/yearly/2024")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["year"] == "2024"
+        summary = data["summary"]
+        assert float(summary["income"]) == pytest.approx(5000.0)
+        assert float(summary["expenses"]) == pytest.approx(-1200.0)
+        assert float(summary["net"]) == pytest.approx(3800.0)
+        assert "category_breakdown" in data
+
+    async def test_get_yearly_report_empty_year(self, client):
+        r = await client.get("/yearly/2099")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["year"] == "2099"
+        assert float(data["summary"]["income"]) == pytest.approx(0.0)
+        assert float(data["summary"]["expenses"]) == pytest.approx(0.0)
+        assert data["category_breakdown"] == []
+
+    async def test_get_yearly_report_savings_rate(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("10000.00"), txn_date=date(2024, 1, 1)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-2000.00"), txn_date=date(2024, 2, 1)
+        )
+        r = await client.get("/yearly/2024")
+        assert r.status_code == 200
+        savings_rate = r.json()["summary"]["savings_rate"]
+        assert savings_rate == pytest.approx(80.0, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+
+
+class TestTags:
+    async def test_list_tags_empty(self, client):
+        r = await client.get("/tags")
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+
+# ---------------------------------------------------------------------------
+# Category & subcategory classification
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryClassification:
+    async def test_list_all_categories_empty(self, client):
+        r = await client.get("/categories/all")
+        assert r.status_code == 200
+        assert r.json() == {"items": []}
+
+    async def test_list_all_categories(self, client, make_category):
+        await make_category("Food & Drink", "Restaurants")
+        await make_category("Transport", "Fuel")
+        r = await client.get("/categories/all")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 2
+        names = {i["category_name"] for i in items}
+        assert "Food & Drink" in names
+        assert "Transport" in names
+        for item in items:
+            assert "category_id" in item
+            assert "subcategory_id" in item
+            assert "category_name" in item
+            assert "subcategory_name" in item
+
+    async def test_patch_category_classification(self, client, make_category):
+        cat, _sub = await make_category("Housing", "Rent")
+        r = await client.patch(f"/categories/{cat.id}", json={"classification": "need"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["id"] == cat.id
+        assert data["classification"] == "need"
+
+    async def test_patch_category_classification_none(self, client, make_category):
+        cat, _sub = await make_category("Housing", "Rent")
+        r = await client.patch(f"/categories/{cat.id}", json={"classification": None})
+        assert r.status_code == 200
+        assert r.json()["classification"] is None
+
+    async def test_patch_category_not_found(self, client):
+        r = await client.patch("/categories/99999", json={"classification": "need"})
+        assert r.status_code == 404
+
+    async def test_patch_subcategory_classification(self, client, make_category):
+        _cat, sub = await make_category("Entertainment", "Streaming")
+        r = await client.patch(
+            f"/subcategories/{sub.id}", json={"classification": "want"}
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["id"] == sub.id
+        assert data["classification"] == "want"
+
+    async def test_patch_subcategory_not_found(self, client):
+        r = await client.patch("/subcategories/99999", json={"classification": "want"})
+        assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Budgets
+# ---------------------------------------------------------------------------
+
+
+class TestBudgets:
+    async def test_list_empty(self, client):
+        r = await client.get("/budgets")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+        assert "month" in data
+
+    async def test_list_with_month_param(self, client):
+        r = await client.get("/budgets", params={"month": "2024-06"})
+        assert r.status_code == 200
+        assert r.json()["month"] == "2024-06"
+
+    async def test_create_category_budget(self, client, make_category):
+        cat, _sub = await make_category("Food & Drink", "Restaurants")
+        r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "500.00"}
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["scope"] == "category"
+        assert data["name"] == "Food & Drink"
+        assert float(data["amount_limit"]) == pytest.approx(500.0)
+        assert "spent" in data
+        assert "pct" in data
+
+    async def test_create_subcategory_budget(self, client, make_category):
+        _cat, sub = await make_category("Food & Drink", "Restaurants")
+        r = await client.post(
+            "/budgets", json={"subcategory_id": sub.id, "amount_limit": "200.00"}
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["scope"] == "subcategory"
+        assert data["name"] == "Restaurants"
+
+    async def test_create_budget_both_ids_rejected(self, client, make_category):
+        cat, sub = await make_category()
+        r = await client.post(
+            "/budgets",
+            json={
+                "category_id": cat.id,
+                "subcategory_id": sub.id,
+                "amount_limit": "100.00",
+            },
+        )
+        assert r.status_code == 422
+
+    async def test_create_budget_no_id_rejected(self, client):
+        r = await client.post("/budgets", json={"amount_limit": "100.00"})
+        assert r.status_code == 422
+
+    async def test_create_budget_non_positive_limit_rejected(
+        self, client, make_category
+    ):
+        cat, _sub = await make_category()
+        r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "0"}
+        )
+        assert r.status_code == 422
+
+    async def test_create_budget_duplicate_rejected(self, client, make_category):
+        cat, _sub = await make_category()
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "100.00"}
+        )
+        r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "200.00"}
+        )
+        assert r.status_code == 409
+
+    async def test_update_budget(self, client, make_category):
+        cat, _sub = await make_category()
+        create_r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "100.00"}
+        )
+        budget_id = create_r.json()["id"]
+        r = await client.patch(f"/budgets/{budget_id}", json={"amount_limit": "350.00"})
+        assert r.status_code == 200
+        assert float(r.json()["amount_limit"]) == pytest.approx(350.0)
+
+    async def test_update_budget_non_positive_rejected(self, client, make_category):
+        cat, _sub = await make_category()
+        create_r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "100.00"}
+        )
+        budget_id = create_r.json()["id"]
+        r = await client.patch(f"/budgets/{budget_id}", json={"amount_limit": "-50.00"})
+        assert r.status_code == 422
+
+    async def test_update_budget_not_found(self, client):
+        r = await client.patch("/budgets/99999", json={"amount_limit": "100.00"})
+        assert r.status_code == 404
+
+    async def test_delete_budget(self, client, make_category):
+        cat, _sub = await make_category()
+        create_r = await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "100.00"}
+        )
+        budget_id = create_r.json()["id"]
+        r = await client.delete(f"/budgets/{budget_id}")
+        assert r.status_code == 204
+        list_r = await client.get("/budgets")
+        assert all(b["id"] != budget_id for b in list_r.json()["items"])
+
+    async def test_delete_budget_not_found(self, client):
+        r = await client.delete("/budgets/99999")
+        assert r.status_code == 404
+
+    async def test_list_budgets_includes_spending(
+        self, client, make_account, make_category, make_transaction
+    ):
+        today = date.today()
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "300.00"}
+        )
+        month = today.strftime("%Y-%m")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-75.00"),
+            subcategory_id=sub.id,
+            txn_date=today,
+        )
+        r = await client.get("/budgets", params={"month": month})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert float(items[0]["spent"]) == pytest.approx(75.0)
+        assert items[0]["pct"] == 25
+
+    async def test_budget_severity_over(
+        self, client, make_account, make_category, make_transaction
+    ):
+        today = date.today()
+        acct = await make_account()
+        cat, sub = await make_category()
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "50.00"}
+        )
+        month = today.strftime("%Y-%m")
+        await make_transaction(
+            acct.id, amount=Decimal("-100.00"), subcategory_id=sub.id, txn_date=today
+        )
+        r = await client.get("/budgets", params={"month": month})
+        item = r.json()["items"][0]
+        assert item["severity"] == "over"
+        assert item["pct"] >= 100
+
+    async def test_wizard_no_data(self, client):
+        r = await client.get("/budgets/wizard")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+        assert data["months_analyzed"] == 0
+        assert data["avg_monthly_income"] == "0"
+
+    async def test_wizard_with_spending(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        for month in [1, 2, 3]:
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-200.00"),
+                subcategory_id=sub.id,
+                txn_date=date(2024, month, 15),
+            )
+            await make_transaction(
+                acct.id, amount=Decimal("3000.00"), txn_date=date(2024, month, 1)
+            )
+        r = await client.get("/budgets/wizard", params={"scope": "category"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["months_analyzed"] > 0
+        assert len(data["items"]) > 0
+        item = data["items"][0]
+        assert "id" in item
+        assert "name" in item
+        assert "avg_monthly" in item
+        assert "already_budgeted" in item
+
+    async def test_batch_create_budgets(self, client, make_category):
+        cat1, _sub1 = await make_category("Food & Drink", "Restaurants")
+        cat2, _sub2 = await make_category("Transport", "Fuel")
+        r = await client.post(
+            "/budgets/batch",
+            json={
+                "items": [
+                    {"category_id": cat1.id, "amount_limit": "400.00"},
+                    {"category_id": cat2.id, "amount_limit": "150.00"},
+                ]
+            },
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["created"] == 2
+        assert data["skipped"] == 0
+
+    async def test_batch_skips_existing(self, client, make_category):
+        cat, _sub = await make_category()
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "100.00"}
+        )
+        r = await client.post(
+            "/budgets/batch",
+            json={"items": [{"category_id": cat.id, "amount_limit": "200.00"}]},
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["created"] == 0
+        assert data["skipped"] == 1
+
+    async def test_batch_skips_invalid_items(self, client, make_category):
+        cat, sub = await make_category()
+        r = await client.post(
+            "/budgets/batch",
+            json={
+                "items": [
+                    # Both ids set — invalid
+                    {
+                        "category_id": cat.id,
+                        "subcategory_id": sub.id,
+                        "amount_limit": "100.00",
+                    },
+                    # Zero limit — invalid
+                    {"category_id": cat.id, "amount_limit": "0"},
+                ]
+            },
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["created"] == 0
+        assert data["skipped"] == 2

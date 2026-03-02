@@ -14,6 +14,7 @@ const NAV = [
   { to: "/imports", label: "Imports", icon: "📋" },
   { to: "/recurring", label: "Recurring", icon: "🔁" },
   { to: "/monthly", label: "Monthly", icon: "📅" },
+  { to: "/yearly", label: "Yearly", icon: "📆" },
   { to: "/trends", label: "Trends", icon: "📈" },
   { to: "/help", label: "Help", icon: "❓" },
 ];

@@ -11,6 +11,7 @@ import {
   parseQuery,
   updateTransaction,
   reEnrichTransactions,
+  fetchTags,
 } from "../api/client";
 import type { TransactionFilters, TransactionUpdateBody } from "../api/client";
 import type { CardHolderItem, CategoryItem, TransactionItem } from "../types";
@@ -52,6 +53,7 @@ const EMPTY_FILTERS = {
   is_recurring: "",
   uncategorized: "",
   cardholder: "",
+  tag: "",
 };
 
 type FormFilters = typeof EMPTY_FILTERS;
@@ -71,6 +73,7 @@ function filtersFromParams(p: URLSearchParams): FormFilters {
     is_recurring: p.get("is_recurring") ?? "",
     uncategorized: p.get("uncategorized") ?? "",
     cardholder: p.get("cardholder") ?? "",
+    tag: p.get("tag") ?? "",
   };
 }
 
@@ -89,6 +92,7 @@ function buildParams(f: FormFilters, sb: SortKey, sd: "asc" | "desc"): URLSearch
   if (f.is_recurring) p.set("is_recurring", f.is_recurring);
   if (f.uncategorized) p.set("uncategorized", f.uncategorized);
   if (f.cardholder) p.set("cardholder", f.cardholder);
+  if (f.tag) p.set("tag", f.tag);
   if (sb !== "date") p.set("sort_by", sb);
   if (sd !== "desc") p.set("sort_dir", sd);
   return p;
@@ -110,6 +114,7 @@ function toApiFilters(f: FormFilters): TransactionFilters {
   else if (f.is_recurring === "false") out.is_recurring = false;
   if (f.uncategorized === "true") out.uncategorized = true;
   if (f.cardholder) out.cardholder = f.cardholder;
+  if (f.tag) out.tag = f.tag;
   return out;
 }
 
@@ -123,6 +128,8 @@ interface EditTransactionModalProps {
   onSaved: (updated: TransactionItem) => void;
 }
 
+const TAG_REGEX = /^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$/;
+
 function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProps) {
   const [form, setForm] = useState({
     description: tx.description,
@@ -132,6 +139,10 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
     notes: tx.notes ?? "",
     card_number: tx.card_number ?? "",
   });
+  const [tags, setTags] = useState<string[]>(tx.tags ?? []);
+  const [tagInput, setTagInput] = useState("");
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [reEnriching, setReEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +154,13 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
   useEffect(() => {
     listCategories()
       .then((res) => setAllCategoryRows(res.items))
+      .catch(() => {});
+  }, []);
+
+  // Load all tags for autocomplete
+  useEffect(() => {
+    fetchTags()
+      .then((res) => setAllTags(res.items))
       .catch(() => {});
   }, []);
 
@@ -195,6 +213,26 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
     }
   }
 
+  function addTag() {
+    const name = tagInput.trim().toLowerCase();
+    if (!name) return;
+    if (!TAG_REGEX.test(name)) {
+      setTagError("Invalid tag format. Use letters, numbers, and hyphens (e.g. home-improvement).");
+      return;
+    }
+    if (tags.includes(name)) {
+      setTagError("Tag already added.");
+      return;
+    }
+    setTags((prev) => [...prev, name]);
+    setTagInput("");
+    setTagError(null);
+  }
+
+  function removeTag(name: string) {
+    setTags((prev) => prev.filter((t) => t !== name));
+  }
+
   async function handleReEnrich() {
     setReEnriching(true);
     setError(null);
@@ -210,6 +248,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
           notes: updated.notes ?? "",
           card_number: updated.card_number ?? "",
         });
+        setTags(updated.tags ?? []);
         onSaved(updated);
       }
     } catch (e) {
@@ -230,6 +269,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         subcategory: form.subcategory.trim() || null,
         notes: form.notes.trim() || null,
         card_number: form.card_number.trim() || null,
+        tags,
       };
       const updated = await updateTransaction(tx.id, body);
       onSaved(updated);
@@ -371,6 +411,64 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
               placeholder="e.g. 1234"
               className={inputClass + " font-mono"}
             />
+
+            <label className="text-sm text-gray-700 font-medium text-right self-start pt-1">
+              Tags
+            </label>
+            <div>
+              <div className="flex gap-1.5 flex-wrap mb-1.5">
+                {tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200"
+                  >
+                    {t}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(t)}
+                      className="text-violet-400 hover:text-violet-700 focus:outline-none"
+                      aria-label={`Remove tag ${t}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => {
+                    setTagInput(e.target.value);
+                    setTagError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTag();
+                    }
+                  }}
+                  placeholder="e.g. home-improvement"
+                  list="tag-suggestions"
+                  className={inputClass}
+                />
+                <datalist id="tag-suggestions">
+                  {allTags
+                    .filter((t) => !tags.includes(t))
+                    .map((t) => (
+                      <option key={t} value={t} />
+                    ))}
+                </datalist>
+                <button
+                  type="button"
+                  onClick={addTag}
+                  className="px-3 py-1.5 text-xs font-medium text-indigo-600 border border-indigo-300 rounded hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 whitespace-nowrap"
+                >
+                  Add
+                </button>
+              </div>
+              {tagError && <p className="mt-1 text-xs text-red-600">{tagError}</p>}
+            </div>
           </div>
 
           {error && (
@@ -491,6 +589,20 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
             {tx.subcategory ?? <span className="text-gray-400">—</span>}
           </Row>
           <Row label="Notes">{tx.notes ?? <span className="text-gray-400">—</span>}</Row>
+          {tx.tags && tx.tags.length > 0 && (
+            <Row label="Tags">
+              <span className="inline-flex gap-1 flex-wrap">
+                {tx.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </span>
+            </Row>
+          )}
           {(tx.cardholder_name || tx.card_number) && (
             <Row label="Card">
               {tx.card_number && <span className="font-mono">ending in {tx.card_number}</span>}
@@ -805,6 +917,7 @@ export default function TransactionsPage() {
   const [allAccountNames, setAllAccountNames] = useState<string[]>([]);
   const [merchantFilterSuggestions, setMerchantFilterSuggestions] = useState<string[]>([]);
   const [accountFilterSuggestions, setAccountFilterSuggestions] = useState<string[]>([]);
+  const [allTagSuggestions, setAllTagSuggestions] = useState<string[]>([]);
 
   const categoryFilterSuggestions = (() => {
     const q = filters.category.trim().toLowerCase();
@@ -876,6 +989,12 @@ export default function TransactionsPage() {
   useEffect(() => {
     listAccounts({ limit: 500 })
       .then((r) => setAllAccountNames(r.items.map((a) => a.name)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchTags()
+      .then((r) => setAllTagSuggestions(r.items))
       .catch(() => {});
   }, []);
 
@@ -1255,6 +1374,16 @@ export default function TransactionsPage() {
             />
           </div>
           <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Tag</label>
+            <ComboBox
+              value={filters.tag}
+              onChange={(v) => setField("tag", v)}
+              suggestions={allTagSuggestions}
+              placeholder="e.g. rent"
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Recurring</label>
             <select
               value={filters.is_recurring}
@@ -1439,6 +1568,18 @@ export default function TransactionsPage() {
                       {row.is_recurring && (
                         <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">
                           recurring
+                        </span>
+                      )}
+                      {row.tags && row.tags.length > 0 && (
+                        <span className="ml-2 inline-flex gap-1 flex-wrap">
+                          {row.tags.map((t) => (
+                            <span
+                              key={t}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200"
+                            >
+                              {t}
+                            </span>
+                          ))}
                         </span>
                       )}
                     </td>

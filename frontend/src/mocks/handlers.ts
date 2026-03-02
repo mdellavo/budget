@@ -48,4 +48,13 @@ export const handlers = [
   ),
   http.patch("/api/categories/:id", () => HttpResponse.json({ id: 1, classification: null })),
   http.patch("/api/subcategories/:id", () => HttpResponse.json({ id: 1, classification: null })),
+  http.get("/api/tags", () => HttpResponse.json({ items: [] })),
+  http.get("/api/yearly", () => HttpResponse.json({ years: [] })),
+  http.get("/api/yearly/:year", () =>
+    HttpResponse.json({
+      year: "2024",
+      summary: { transaction_count: 0, income: "0", expenses: "0", net: "0", savings_rate: null },
+      category_breakdown: [],
+    })
+  ),
 ];

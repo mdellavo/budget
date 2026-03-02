@@ -6,10 +6,13 @@ Each test gets a fresh in-memory SQLite database via the engine/db_session fixtu
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from budget.models import CsvImport, Merchant, Transaction
 from budget.query import (
     AccountQueries,
     AnalyticsQueries,
+    BudgetQueries,
     CardHolderQueries,
     CategoryQueries,
     CsvImportQueries,
@@ -933,3 +936,238 @@ class TestAnalyticsQueries:
         rows = await aq.get_recurring_transactions()
         assert len(rows) == 1
         assert rows[0].merchant_name == "Netflix"
+
+
+# ---------------------------------------------------------------------------
+# AnalyticsQueries — yearly
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyticsQueriesYearly:
+    async def test_list_years_empty(self, db_session):
+        aq = AnalyticsQueries(db_session)
+        years = await aq.list_years()
+        assert years == []
+
+    async def test_list_years(self, db_session, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2023, 5, 10))
+        await make_transaction(acct.id, txn_date=date(2024, 11, 20))
+        aq = AnalyticsQueries(db_session)
+        years = await aq.list_years()
+        assert "2023" in years
+        assert "2024" in years
+        assert years.index("2024") < years.index("2023")  # descending
+
+    async def test_get_year_stats(self, db_session, make_account, make_transaction):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("6000.00"), txn_date=date(2024, 3, 1)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-900.00"), txn_date=date(2024, 7, 15)
+        )
+        aq = AnalyticsQueries(db_session)
+        stats = await aq.get_year_stats("2024")
+        assert stats["transaction_count"] == 2
+        assert stats["income"] == Decimal("6000.00")
+        assert stats["expenses"] == Decimal("-900.00")
+
+    async def test_get_year_stats_empty(self, db_session):
+        aq = AnalyticsQueries(db_session)
+        stats = await aq.get_year_stats("2099")
+        assert stats["transaction_count"] == 0
+        assert stats["income"] == Decimal(0)
+        assert stats["expenses"] == Decimal(0)
+
+    async def test_get_year_category_breakdown(
+        self, db_session, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Groceries")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-150.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2024, 4, 1),
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("2000.00"), txn_date=date(2024, 4, 1)
+        )  # income, excluded
+        aq = AnalyticsQueries(db_session)
+        rows = await aq.get_year_category_breakdown("2024")
+        assert len(rows) == 1
+        assert rows[0].category == "Food & Drink"
+        assert rows[0].subcategory == "Groceries"
+        assert rows[0].total == Decimal("-150.00")
+
+
+# ---------------------------------------------------------------------------
+# BudgetQueries
+# ---------------------------------------------------------------------------
+
+
+class TestBudgetQueries:
+    async def test_create_category_budget(self, db_session, make_category):
+        cat, _sub = await make_category("Food & Drink", "Restaurants")
+        bq = BudgetQueries(db_session, user_id=1)
+        budget = await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("300.00")
+        )
+        await db_session.commit()
+        assert budget.id is not None
+        assert budget.category_id == cat.id
+        assert budget.subcategory_id is None
+        assert budget.amount_limit == Decimal("300.00")
+
+    async def test_create_subcategory_budget(self, db_session, make_category):
+        _cat, sub = await make_category("Transport", "Fuel")
+        bq = BudgetQueries(db_session, user_id=1)
+        budget = await bq.create(
+            category_id=None, subcategory_id=sub.id, amount_limit=Decimal("100.00")
+        )
+        await db_session.commit()
+        assert budget.subcategory_id == sub.id
+        assert budget.category_id is None
+
+    async def test_list_with_spending_zero_by_default(self, db_session, make_category):
+        cat, _sub = await make_category()
+        bq = BudgetQueries(db_session, user_id=1)
+        await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("200.00")
+        )
+        await db_session.commit()
+        rows = await bq.list_with_spending("2024-01")
+        assert len(rows) == 1
+        assert rows[0].spent == Decimal(0)
+
+    async def test_list_with_spending_counts_transactions(
+        self, db_session, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        bq = BudgetQueries(db_session, user_id=1)
+        await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("500.00")
+        )
+        await db_session.commit()
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-80.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2024, 1, 10),
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-120.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2024, 1, 20),
+        )
+        rows = await bq.list_with_spending("2024-01")
+        assert len(rows) == 1
+        assert rows[0].spent == Decimal("200.00")
+
+    async def test_list_with_spending_excludes_other_months(
+        self, db_session, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category()
+        bq = BudgetQueries(db_session, user_id=1)
+        await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("200.00")
+        )
+        await db_session.commit()
+        # Transaction in a different month
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2024, 2, 5),
+        )
+        rows = await bq.list_with_spending("2024-01")
+        assert rows[0].spent == Decimal(0)
+
+    async def test_get_returns_budget(self, db_session, make_category):
+        cat, _sub = await make_category()
+        bq = BudgetQueries(db_session, user_id=1)
+        created = await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("150.00")
+        )
+        await db_session.commit()
+        fetched = await bq.get(created.id)
+        assert fetched is not None
+        assert fetched.id == created.id
+
+    async def test_get_returns_none_for_missing(self, db_session):
+        bq = BudgetQueries(db_session, user_id=1)
+        assert await bq.get(99999) is None
+
+    async def test_update_budget(self, db_session, make_category):
+        cat, _sub = await make_category()
+        bq = BudgetQueries(db_session, user_id=1)
+        budget = await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("100.00")
+        )
+        await db_session.commit()
+        await bq.update(budget, Decimal("250.00"))
+        await db_session.commit()
+        refreshed = await bq.get(budget.id)
+        assert refreshed is not None
+        assert refreshed.amount_limit == Decimal("250.00")
+
+    async def test_delete_budget(self, db_session, make_category):
+        cat, _sub = await make_category()
+        bq = BudgetQueries(db_session, user_id=1)
+        budget = await bq.create(
+            category_id=cat.id, subcategory_id=None, amount_limit=Decimal("100.00")
+        )
+        await db_session.commit()
+        deleted = await bq.delete(budget.id)
+        await db_session.commit()
+        assert deleted is True
+        assert await bq.get(budget.id) is None
+
+    async def test_delete_missing_returns_false(self, db_session):
+        bq = BudgetQueries(db_session, user_id=1)
+        assert await bq.delete(99999) is False
+
+    async def test_get_spending_averages_category(
+        self, db_session, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        # 2 months of spending: $300 total → avg $150/month
+        for month in [1, 2]:
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-150.00"),
+                subcategory_id=sub.id,
+                txn_date=date(2024, month, 15),
+            )
+        bq = BudgetQueries(db_session, user_id=1)
+        rows = await bq.get_spending_averages(["2024-01", "2024-02"], scope="category")
+        assert len(rows) == 1
+        assert rows[0].name == "Food & Drink"
+        assert float(rows[0].avg_monthly) == pytest.approx(150.0)
+
+    async def test_get_spending_averages_subcategory(
+        self, db_session, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        _cat, sub = await make_category("Food & Drink", "Groceries")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-240.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2024, 1, 10),
+        )
+        bq = BudgetQueries(db_session, user_id=1)
+        rows = await bq.get_spending_averages(["2024-01"], scope="subcategory")
+        assert len(rows) == 1
+        assert rows[0].name == "Groceries"
+        assert float(rows[0].avg_monthly) == pytest.approx(240.0)
+
+    async def test_get_spending_averages_empty_months(self, db_session):
+        bq = BudgetQueries(db_session, user_id=1)
+        rows = await bq.get_spending_averages([], scope="category")
+        assert rows == []

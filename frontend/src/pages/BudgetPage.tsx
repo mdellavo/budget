@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import HelpIcon from "../components/HelpIcon";
+import { parseAmount } from "../lib/format";
 import {
   listBudgets,
   listAllCategories,
@@ -434,7 +435,7 @@ function WizardSection({
   }
 
   // 50/30/20 calculations
-  const income = wizardData ? parseFloat(wizardData.avg_monthly_income) : 0;
+  const income = wizardData ? parseAmount(wizardData.avg_monthly_income) : 0;
   const targetNeeds = income * 0.5;
   const targetWants = income * 0.3;
   const targetSavings = income * 0.2;
@@ -447,7 +448,7 @@ function WizardSection({
         (item.scope === "category"
           ? classificationMap[item.id]
           : subcategoryClassificationMap[item.id]) ?? null;
-      const avg = parseFloat(item.avg_monthly);
+      const avg = parseAmount(item.avg_monthly);
       if (c === "need") totalNeedsAvg += avg;
       else if (c === "want") totalWantsAvg += avg;
     }
@@ -479,9 +480,9 @@ function WizardSection({
             (item.scope === "category"
               ? classificationMap[item.id]
               : subcategoryClassificationMap[item.id]) ?? null;
-          const avg = parseFloat(item.avg_monthly);
-          if (c === "need") limit = (avg * needsScale).toFixed(2);
-          else if (c === "want") limit = (avg * wantsScale).toFixed(2);
+          const avg = parseAmount(item.avg_monthly);
+          if (c === "need") limit = (Math.round(avg * needsScale * 100) / 100).toFixed(2);
+          else if (c === "want") limit = (Math.round(avg * wantsScale * 100) / 100).toFixed(2);
           else limit = item.avg_monthly;
         } else {
           limit = item.avg_monthly;
@@ -1154,16 +1155,16 @@ export default function BudgetPage() {
           // Compute needs vs wants totals
           const needSpent = budgets
             .filter((b) => getClassification(b) === "need")
-            .reduce((sum, b) => sum + parseFloat(b.spent), 0);
+            .reduce((sum, b) => sum + parseAmount(b.spent), 0);
           const needLimit = budgets
             .filter((b) => getClassification(b) === "need")
-            .reduce((sum, b) => sum + parseFloat(b.amount_limit), 0);
+            .reduce((sum, b) => sum + parseAmount(b.amount_limit), 0);
           const wantSpent = budgets
             .filter((b) => getClassification(b) === "want")
-            .reduce((sum, b) => sum + parseFloat(b.spent), 0);
+            .reduce((sum, b) => sum + parseAmount(b.spent), 0);
           const wantLimit = budgets
             .filter((b) => getClassification(b) === "want")
-            .reduce((sum, b) => sum + parseFloat(b.amount_limit), 0);
+            .reduce((sum, b) => sum + parseAmount(b.amount_limit), 0);
           const hasClassified = needLimit > 0 || wantLimit > 0;
           const savings = Math.max(0, monthIncome - needLimit - wantLimit);
 

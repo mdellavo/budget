@@ -17,7 +17,9 @@ from .models import (
     CsvImport,
     Merchant,
     Subcategory,
+    Tag,
     Transaction,
+    transaction_tags,
 )
 
 
@@ -115,6 +117,76 @@ class AnalyticsQueries:
                 .outerjoin(Category, Subcategory.category_id == Category.id)
                 .where(
                     month_filter,
+                    Transaction.amount < 0,
+                    *self._user_filter(),
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
+                .group_by(Category.name, Subcategory.name)
+                .order_by(func.sum(Transaction.amount).asc())
+            )
+        ).all()
+        return rows
+
+    async def list_years(self) -> list[str]:
+        stmt = (
+            select(func.strftime("%Y", Transaction.date).label("year"))
+            .where(*self._user_filter())
+            .group_by(func.strftime("%Y", Transaction.date))
+            .order_by(text("year DESC"))
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return [r.year for r in rows]
+
+    async def get_year_stats(self, year: str) -> dict:
+        year_filter = func.strftime("%Y", Transaction.date) == year
+        user_filters = self._user_filter()
+        transfer_filter = or_(
+            Subcategory.category_id.is_(None),
+            ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+        )
+        transaction_count = (
+            await self.db.scalar(
+                select(func.count(Transaction.id)).where(year_filter, *user_filters)
+            )
+            or 0
+        )
+        income = await self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(year_filter, Transaction.amount > 0, *user_filters, transfer_filter)
+        ) or Decimal(0)
+        expenses = await self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .select_from(Transaction)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(year_filter, Transaction.amount < 0, *user_filters, transfer_filter)
+        ) or Decimal(0)
+        return {
+            "transaction_count": transaction_count,
+            "income": income,
+            "expenses": expenses,
+        }
+
+    async def get_year_category_breakdown(self, year: str) -> list:
+        year_filter = func.strftime("%Y", Transaction.date) == year
+        rows = (
+            await self.db.execute(
+                select(
+                    func.coalesce(Category.name, "Uncategorized").label("category"),
+                    func.coalesce(Subcategory.name, "Uncategorized").label(
+                        "subcategory"
+                    ),
+                    func.sum(Transaction.amount).label("total"),
+                )
+                .select_from(Transaction)
+                .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .outerjoin(Category, Subcategory.category_id == Category.id)
+                .where(
+                    year_filter,
                     Transaction.amount < 0,
                     *self._user_filter(),
                     or_(
@@ -1167,6 +1239,7 @@ class TransactionQueries:
         is_recurring=None,
         uncategorized=None,
         cardholder=None,
+        tag=None,
     ) -> list:
         conditions = []
         if self.user_id is not None:
@@ -1215,6 +1288,17 @@ class TransactionQueries:
                 )
             )
             conditions.append(Transaction.cardholder_id.in_(ch_ids))
+        if tag:
+            tag_ids = select(Tag.id).where(Tag.name.ilike(tag))
+            if self.user_id is not None:
+                tag_ids = tag_ids.where(Tag.user_id == self.user_id)
+            conditions.append(
+                Transaction.id.in_(
+                    select(transaction_tags.c.transaction_id).where(
+                        transaction_tags.c.tag_id.in_(tag_ids)
+                    )
+                )
+            )
         return conditions
 
     async def count(self, conditions: list) -> int:
@@ -1306,6 +1390,7 @@ class TransactionQueries:
                     Subcategory.category
                 ),
                 selectinload(Transaction.cardholder),
+                selectinload(Transaction.tags),
             )
             .order_by(*order_clauses)
             .limit(limit + 1)
@@ -1329,6 +1414,7 @@ class TransactionQueries:
                         Subcategory.category
                     ),
                     selectinload(Transaction.cardholder),
+                    selectinload(Transaction.tags),
                 )
             )
         ).scalar_one_or_none()
@@ -1344,6 +1430,7 @@ class TransactionQueries:
                     Subcategory.category
                 ),
                 selectinload(Transaction.cardholder),
+                selectinload(Transaction.tags),
             )
         )
         return list(result.scalars().all())
@@ -1386,6 +1473,33 @@ class TransactionQueries:
             self.db.add(subcategory)
             await self.db.flush()
         return subcategory
+
+    async def find_or_create_tag(self, name: str) -> Tag:
+        stmt = select(Tag).where(Tag.name.ilike(name))
+        if self.user_id is not None:
+            stmt = stmt.where(Tag.user_id == self.user_id)
+        tag = (await self.db.execute(stmt)).scalar_one_or_none()
+        if tag is None:
+            tag = Tag(name=name.lower(), user_id=self.user_id)
+            self.db.add(tag)
+            await self.db.flush()
+        return tag
+
+    async def set_transaction_tags(
+        self, tx: Transaction, tag_names: Sequence[str]
+    ) -> None:
+        tx.tags.clear()
+        await self.db.flush()
+        for name in tag_names:
+            tag = await self.find_or_create_tag(name)
+            tx.tags.append(tag)
+
+    async def list_all_tags(self) -> Sequence[Tag]:
+        stmt = select(Tag).order_by(Tag.name)
+        if self.user_id is not None:
+            stmt = stmt.where(Tag.user_id == self.user_id)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
 
 
 class BudgetQueries:
