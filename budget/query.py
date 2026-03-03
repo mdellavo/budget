@@ -31,9 +31,10 @@ class AnalyticsQueries:
         self.user_id = user_id
 
     def _user_filter(self):
+        base = [Transaction.is_excluded == False]  # noqa: E712
         if self.user_id is not None:
-            return [Transaction.user_id == self.user_id]
-        return []
+            base.append(Transaction.user_id == self.user_id)
+        return base
 
     def _transfer_cat_subq(self):
         stmt = select(Category.id).where(Category.name == "Transfer")
@@ -992,9 +993,6 @@ class CsvImportQueries:
         existing: CsvImport | None,
     ) -> CsvImport:
         if existing:
-            await self.db.execute(
-                delete(Transaction).where(Transaction.csv_import_id == existing.id)
-            )
             existing.account_id = account_id
             existing.imported_at = datetime.utcnow()
             existing.row_count = row_count
@@ -1554,6 +1552,72 @@ class TransactionQueries:
             stmt = stmt.where(Tag.user_id == self.user_id)
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def find_duplicates(self) -> Sequence[Sequence[Transaction]]:
+        """Return groups of non-excluded transactions sharing (account, date, amount, raw_description)."""
+        # Subquery: (account_id, date, amount, raw_description) combos with more than one row
+        dup_subq = select(
+            Transaction.account_id,
+            Transaction.date,
+            Transaction.amount,
+            Transaction.raw_description,
+        ).where(
+            Transaction.is_excluded == False,  # noqa: E712
+        )
+        if self.user_id is not None:
+            dup_subq = dup_subq.where(Transaction.user_id == self.user_id)
+        dup_subq = (
+            dup_subq.group_by(
+                Transaction.account_id,
+                Transaction.date,
+                Transaction.amount,
+                Transaction.raw_description,
+            )
+            .having(func.count(Transaction.id) > 1)
+            .subquery()
+        )
+
+        stmt = (
+            select(Transaction)
+            .join(
+                dup_subq,
+                and_(
+                    Transaction.account_id == dup_subq.c.account_id,
+                    Transaction.date == dup_subq.c.date,
+                    Transaction.amount == dup_subq.c.amount,
+                    or_(
+                        Transaction.raw_description == dup_subq.c.raw_description,
+                        and_(
+                            Transaction.raw_description.is_(None),
+                            dup_subq.c.raw_description.is_(None),
+                        ),
+                    ),
+                ),
+            )
+            .where(Transaction.is_excluded == False)  # noqa: E712
+            .options(
+                selectinload(Transaction.account),
+                selectinload(Transaction.merchant),
+                selectinload(Transaction.subcategory).selectinload(
+                    Subcategory.category
+                ),
+                selectinload(Transaction.cardholder),
+                selectinload(Transaction.tags),
+            )
+            .order_by(Transaction.date.desc(), Transaction.account_id, Transaction.id)
+        )
+        if self.user_id is not None:
+            stmt = stmt.where(Transaction.user_id == self.user_id)
+
+        rows = (await self.db.execute(stmt)).scalars().all()
+
+        # Group by (account_id, date, amount, raw_description)
+        groups: dict[tuple, list[Transaction]] = {}
+        for tx in rows:
+            key = (tx.account_id, tx.date, tx.amount, tx.raw_description)
+            groups.setdefault(key, []).append(tx)
+
+        return list(groups.values())
 
 
 class BudgetQueries:

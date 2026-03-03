@@ -1282,6 +1282,259 @@ class TestRunEnrichment:
 
 
 # ---------------------------------------------------------------------------
+# Fingerprint deduplication
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplication:
+    """_run_enrichment upserts rows by fingerprint — duplicates are updated, not duplicated."""
+
+    async def _setup_db(self):
+        eng = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        return eng
+
+    def _batch_result(self, index=0, description="Coffee"):
+        return {
+            "index": index,
+            "description": description,
+            "merchant_name": None,
+            "merchant_location": None,
+            "category": None,
+            "subcategory": None,
+            "is_recurring": False,
+        }
+
+    async def test_duplicate_row_upserted_on_reimport(self, mocker):
+        """Re-importing the same row (same fingerprint) updates in-place — no duplicate created."""
+        eng = await self._setup_db()
+        factory = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[self._batch_result()],
+        )
+
+        async with factory() as session:
+            acct = Account(name="Checking", user_id=1)
+            session.add(acct)
+            await session.flush()
+            ci1 = CsvImport(
+                user_id=1,
+                account_id=acct.id,
+                filename="a.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            ci2 = CsvImport(
+                user_id=1,
+                account_id=acct.id,
+                filename="b.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            session.add(ci1)
+            session.add(ci2)
+            await session.commit()
+            acct_id, ci1_id, ci2_id = acct.id, ci1.id, ci2.id
+
+        rows = [{"Date": "2024-01-15", "Amount": "-5.00", "Description": "Coffee"}]
+        enrich_input = [
+            {
+                "index": 0,
+                "description": "Coffee",
+                "amount": "-5.00",
+                "date": "2024-01-15",
+            }
+        ]
+
+        # First import
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=acct_id,
+            csv_import_id=ci1_id,
+            user_id=1,
+        )
+        # Second import with identical row
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=acct_id,
+            csv_import_id=ci2_id,
+            user_id=1,
+        )
+
+        async with factory() as session:
+            txs = (
+                (
+                    await session.execute(
+                        select(Transaction).where(Transaction.account_id == acct_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(txs) == 1
+
+        await eng.dispose()
+
+    async def test_upsert_does_not_create_duplicate(self, mocker):
+        """Re-importing a duplicate row upserts it; skipped_duplicates stays 0 and count stays 1."""
+        eng = await self._setup_db()
+        factory = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[self._batch_result()],
+        )
+
+        async with factory() as session:
+            acct = Account(name="Savings", user_id=1)
+            session.add(acct)
+            await session.flush()
+            ci1 = CsvImport(
+                user_id=1,
+                account_id=acct.id,
+                filename="c.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            ci2 = CsvImport(
+                user_id=1,
+                account_id=acct.id,
+                filename="d.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            session.add(ci1)
+            session.add(ci2)
+            await session.commit()
+            acct_id, ci1_id, ci2_id = acct.id, ci1.id, ci2.id
+
+        rows = [{"Date": "2024-02-01", "Amount": "-10.00", "Description": "Gym"}]
+        enrich_input = [
+            {"index": 0, "description": "Gym", "amount": "-10.00", "date": "2024-02-01"}
+        ]
+
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=acct_id,
+            csv_import_id=ci1_id,
+            user_id=1,
+        )
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=acct_id,
+            csv_import_id=ci2_id,
+            user_id=1,
+        )
+
+        async with factory() as session:
+            ci2_obj = await session.get(CsvImport, ci2_id)
+            assert ci2_obj.skipped_duplicates == 0
+            txs = (
+                (
+                    await session.execute(
+                        select(Transaction).where(Transaction.account_id == acct_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(txs) == 1
+
+        await eng.dispose()
+
+    async def test_fingerprint_stored_on_transaction(self, mocker):
+        """Each inserted transaction has a non-null fingerprint."""
+        eng = await self._setup_db()
+        factory = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch(
+            "budget.main.enricher._enrich_batch",
+            return_value=[self._batch_result()],
+        )
+
+        async with factory() as session:
+            acct = Account(name="Debit", user_id=1)
+            session.add(acct)
+            await session.flush()
+            ci = CsvImport(
+                user_id=1,
+                account_id=acct.id,
+                filename="f.csv",
+                row_count=1,
+                enriched_rows=0,
+                status="in-progress",
+            )
+            session.add(ci)
+            await session.commit()
+            acct_id, ci_id = acct.id, ci.id
+
+        rows = [{"Date": "2024-04-01", "Amount": "-8.00", "Description": "Tea"}]
+        enrich_input = [
+            {"index": 0, "description": "Tea", "amount": "-8.00", "date": "2024-04-01"}
+        ]
+
+        await _run_enrichment(
+            enrich_input=enrich_input,
+            rows=rows,
+            date_col="Date",
+            amount_col="Amount",
+            desc_col="Description",
+            account_id=acct_id,
+            csv_import_id=ci_id,
+            user_id=1,
+        )
+
+        async with factory() as session:
+            tx = (
+                (
+                    await session.execute(
+                        select(Transaction).where(Transaction.account_id == acct_id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            assert tx is not None
+            assert tx.fingerprint is not None
+            assert len(tx.fingerprint) == 16
+
+        await eng.dispose()
+
+
+# ---------------------------------------------------------------------------
 # parse_date / parse_amount helpers
 # ---------------------------------------------------------------------------
 
@@ -2408,3 +2661,225 @@ class TestTrendsSummary:
         await client.get("/category-trends/summary")
         await client.get("/category-trends/summary", params={"force": "true"})
         assert mock_summarize.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# GET /transactions/duplicates
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicatesEndpoint:
+    async def test_empty_when_no_duplicates(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("-10.00"), txn_date=date(2024, 1, 1)
+        )
+        r = await client.get("/transactions/duplicates")
+        assert r.status_code == 200
+        assert r.json()["groups"] == []
+
+    async def test_returns_group_for_duplicates(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        t1 = await make_transaction(
+            acct.id,
+            amount=Decimal("-4.50"),
+            txn_date=date(2024, 3, 10),
+            description="Coffee",
+            raw_description="COFFEE",
+        )
+        t2 = await make_transaction(
+            acct.id,
+            amount=Decimal("-4.50"),
+            txn_date=date(2024, 3, 10),
+            description="Coffee 2",
+            raw_description="COFFEE",
+        )
+        r = await client.get("/transactions/duplicates")
+        assert r.status_code == 200
+        groups = r.json()["groups"]
+        assert len(groups) == 1
+        ids_in_group = {tx["id"] for tx in groups[0]}
+        assert ids_in_group == {t1.id, t2.id}
+
+    async def test_different_raw_descriptions_not_grouped(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-4.50"),
+            txn_date=date(2024, 3, 10),
+            raw_description="COFFEE SHOP",
+        )
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-4.50"),
+            txn_date=date(2024, 3, 10),
+            raw_description="AMAZON.COM",
+        )
+        r = await client.get("/transactions/duplicates")
+        assert r.status_code == 200
+        assert r.json()["groups"] == []
+
+    async def test_excluded_not_in_groups(
+        self, client, make_account, make_transaction, db_session
+    ):
+        acct = await make_account()
+        t1 = await make_transaction(
+            acct.id, amount=Decimal("-4.50"), txn_date=date(2024, 3, 10)
+        )
+        t2 = await make_transaction(
+            acct.id, amount=Decimal("-4.50"), txn_date=date(2024, 3, 10)
+        )
+        # Exclude t2
+        r = await client.patch(
+            f"/transactions/{t2.id}",
+            json={
+                "description": "Coffee",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": True,
+            },
+        )
+        assert r.status_code == 200
+        # Now duplicates endpoint should return no groups (only 1 non-excluded tx)
+        _ = t1  # suppress unused warning
+        r = await client.get("/transactions/duplicates")
+        assert r.status_code == 200
+        assert r.json()["groups"] == []
+
+    async def test_different_amounts_not_grouped(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("-4.50"), txn_date=date(2024, 3, 10)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-5.00"), txn_date=date(2024, 3, 10)
+        )
+        r = await client.get("/transactions/duplicates")
+        assert r.status_code == 200
+        assert r.json()["groups"] == []
+
+
+# ---------------------------------------------------------------------------
+# is_excluded field and analytics filtering
+# ---------------------------------------------------------------------------
+
+
+class TestIsExcluded:
+    async def test_patch_sets_is_excluded(self, client, make_account, make_transaction):
+        acct = await make_account()
+        tx = await make_transaction(acct.id, amount=Decimal("-10.00"))
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": True,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["is_excluded"] is True
+
+    async def test_patch_unsets_is_excluded(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        tx = await make_transaction(acct.id, amount=Decimal("-10.00"))
+        # Exclude then un-exclude
+        await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": True,
+            },
+        )
+        r = await client.patch(
+            f"/transactions/{tx.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": False,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["is_excluded"] is False
+
+    async def test_excluded_absent_from_monthly_stats(
+        self, client, make_account, make_category, make_transaction
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food", "Groceries")
+        # Normal transaction: -50
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            txn_date=date(2024, 1, 15),
+            subcategory_id=sub.id,
+        )
+        # Excluded transaction: -20 (should not appear in stats)
+        tx2 = await make_transaction(
+            acct.id,
+            amount=Decimal("-20.00"),
+            txn_date=date(2024, 1, 15),
+            subcategory_id=sub.id,
+        )
+        await client.patch(
+            f"/transactions/{tx2.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": True,
+            },
+        )
+        r = await client.get("/monthly/2024-01")
+        assert r.status_code == 200
+        data = r.json()
+        assert Decimal(data["summary"]["expenses"]) == Decimal("-50.00")
+
+    async def test_excluded_absent_from_overview(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        await make_transaction(
+            acct.id, amount=Decimal("-30.00"), txn_date=date(2024, 1, 15)
+        )
+        tx2 = await make_transaction(
+            acct.id, amount=Decimal("-10.00"), txn_date=date(2024, 1, 15)
+        )
+        await client.patch(
+            f"/transactions/{tx2.id}",
+            json={
+                "description": "Test",
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "is_excluded": True,
+            },
+        )
+        r = await client.get("/overview")
+        assert r.status_code == 200
+        data = r.json()
+        assert Decimal(data["expenses"]) == Decimal("-30.00")

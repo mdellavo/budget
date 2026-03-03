@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import hashlib
 import io
 import logging
 import os
@@ -280,11 +281,25 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE transactions ADD COLUMN is_refund BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE transactions ADD COLUMN is_international BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE transactions ADD COLUMN payment_channel TEXT",
+            "ALTER TABLE transactions ADD COLUMN fingerprint TEXT",
+            "ALTER TABLE csv_imports ADD COLUMN skipped_duplicates INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE transactions ADD COLUMN is_excluded BOOLEAN NOT NULL DEFAULT 0",
         ]:
             try:
                 await conn.execute(text(col_sql))
             except Exception:
                 pass
+
+        try:
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_transactions_user_fingerprint"
+                    " ON transactions(user_id, fingerprint)"
+                    " WHERE fingerprint IS NOT NULL"
+                )
+            )
+        except Exception:
+            pass
 
     yield
 
@@ -601,6 +616,23 @@ def parse_amount(value: str) -> Decimal:
     return Decimal(cleaned)
 
 
+def _make_fingerprint(
+    account_id: int,
+    date_val: date,
+    amount_val: Decimal,
+    raw_desc: str | None,
+) -> str:
+    """Return a 16-char hex fingerprint for a transaction row.
+
+    Stable across imports: re-importing an overlapping CSV silently skips
+    already-present rows.  Identical rows within the same import collapse to
+    one transaction; use the Duplicates page to review and exclude extras.
+    """
+    desc = (raw_desc or "").strip().lower()
+    base = f"{account_id}:{date_val}:{amount_val}:{desc}"
+    return hashlib.sha256(base.encode()).hexdigest()[:16]
+
+
 async def _run_enrichment(
     enrich_input: list[dict],
     rows: list[dict],
@@ -726,7 +758,10 @@ async def _run_enrichment(
                     for t in (r.get("suggested_tags") or [])
                     if t.strip()
                 ]
-                tx = Transaction(
+                fp = _make_fingerprint(
+                    account_id, date_val, amount_val, raw_description
+                )
+                stmt = sqlite_insert(Transaction).values(
                     account_id=account_id,
                     csv_import_id=csv_import_id,
                     date=date_val,
@@ -740,10 +775,25 @@ async def _run_enrichment(
                     is_refund=is_refund,
                     is_international=is_international,
                     payment_channel=payment_channel,
+                    fingerprint=fp,
                     user_id=user_id,
                 )
-                db.add(tx)
-                await db.flush()
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["user_id", "fingerprint"],
+                    set_={
+                        "description": stmt.excluded.description,
+                        "merchant_id": stmt.excluded.merchant_id,
+                        "subcategory_id": stmt.excluded.subcategory_id,
+                        "cardholder_id": stmt.excluded.cardholder_id,
+                        "is_recurring": stmt.excluded.is_recurring,
+                        "is_refund": stmt.excluded.is_refund,
+                        "is_international": stmt.excluded.is_international,
+                        "payment_channel": stmt.excluded.payment_channel,
+                        "csv_import_id": stmt.excluded.csv_import_id,
+                    },
+                ).returning(Transaction.id)
+                result = await db.execute(stmt)
+                tx_id = result.scalar_one()
                 for tag_name in tag_names:
                     tag = await db.scalar(
                         select(Tag).where(Tag.user_id == user_id, Tag.name == tag_name)
@@ -754,7 +804,7 @@ async def _run_enrichment(
                         await db.flush()
                     await db.execute(
                         sqlite_insert(transaction_tags)
-                        .values(transaction_id=tx.id, tag_id=tag.id)
+                        .values(transaction_id=tx_id, tag_id=tag.id)
                         .on_conflict_do_nothing()
                     )
 
@@ -1712,6 +1762,7 @@ async def get_import_progress(
         "csv_import_id": csv_import.id,
         "row_count": csv_import.row_count,
         "enriched_rows": csv_import.enriched_rows,
+        "skipped_duplicates": csv_import.skipped_duplicates,
         "complete": csv_import.status == "complete",
         "aborted": csv_import.status == "aborted",
     }
@@ -2095,6 +2146,7 @@ async def list_transactions(
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
+                "is_excluded": tx.is_excluded,
                 "is_refund": tx.is_refund,
                 "is_international": tx.is_international,
                 "payment_channel": tx.payment_channel,
@@ -2125,6 +2177,7 @@ class TransactionUpdate(BaseModel):
     notes: str | None  # None = clear notes
     card_number: str | None = None  # None = clear cardholder
     tags: list[str] = []
+    is_excluded: bool | None = None
 
 
 @app.patch("/transactions/{transaction_id}")
@@ -2141,6 +2194,8 @@ async def update_transaction(
 
     tx.description = body.description
     tx.notes = body.notes
+    if body.is_excluded is not None:
+        tx.is_excluded = body.is_excluded
 
     # Merchant
     if body.merchant_name and body.merchant_name.strip():
@@ -2201,6 +2256,7 @@ async def update_transaction(
         "subcategory": tx.subcategory.name if tx.subcategory else None,
         "notes": tx.notes,
         "is_recurring": tx.is_recurring,
+        "is_excluded": tx.is_excluded,
         "is_refund": tx.is_refund,
         "is_international": tx.is_international,
         "payment_channel": tx.payment_channel,
@@ -2209,6 +2265,46 @@ async def update_transaction(
         "card_number": tx.cardholder.card_number if tx.cardholder else None,
         "tags": [t.name for t in tx.tags],
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /transactions/duplicates
+# ---------------------------------------------------------------------------
+
+
+def _serialize_tx(tx: Transaction) -> dict:
+    return {
+        "id": tx.id,
+        "date": tx.date.isoformat(),
+        "description": tx.description,
+        "amount": str(tx.amount),
+        "account_id": tx.account_id,
+        "account": tx.account.name,
+        "merchant": tx.merchant.name if tx.merchant else None,
+        "merchant_website": tx.merchant.website if tx.merchant else None,
+        "category": tx.subcategory.category.name if tx.subcategory else None,
+        "subcategory": tx.subcategory.name if tx.subcategory else None,
+        "notes": tx.notes,
+        "is_recurring": tx.is_recurring,
+        "is_excluded": tx.is_excluded,
+        "is_refund": tx.is_refund,
+        "is_international": tx.is_international,
+        "payment_channel": tx.payment_channel,
+        "raw_description": tx.raw_description,
+        "cardholder_name": tx.cardholder.name if tx.cardholder else None,
+        "card_number": tx.cardholder.card_number if tx.cardholder else None,
+        "tags": [t.name for t in tx.tags],
+    }
+
+
+@app.get("/transactions/duplicates")
+async def list_duplicate_transactions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    txq = TransactionQueries(db, user_id=current_user.id)
+    groups = await txq.find_duplicates()
+    return {"groups": [[_serialize_tx(tx) for tx in group] for group in groups]}
 
 
 class ReEnrichRequest(BaseModel):
@@ -2334,6 +2430,7 @@ async def re_enrich_transactions(
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
+                "is_excluded": tx.is_excluded,
                 "is_refund": tx.is_refund,
                 "is_international": tx.is_international,
                 "payment_channel": tx.payment_channel,
