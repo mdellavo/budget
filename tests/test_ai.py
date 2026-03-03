@@ -9,9 +9,11 @@ import pytest
 
 from budget.ai import (
     SAMPLE_ROWS,
+    SUMMARIZE_SYSTEM,
     ColumnDetector,
     MerchantDuplicateFinder,
     QueryParser,
+    ReportSummarizer,
     TransactionEnricher,
 )
 
@@ -345,3 +347,67 @@ class TestMerchantDuplicateFinder:
         finder.find(merchants_text)
         call_kwargs = finder.client.messages.create.call_args.kwargs
         assert call_kwargs["messages"][0]["content"] == merchants_text
+
+
+# ---------------------------------------------------------------------------
+# ReportSummarizer
+# ---------------------------------------------------------------------------
+
+
+class TestReportSummarizer:
+    def _make_summarizer(self):
+        s = ReportSummarizer.__new__(ReportSummarizer)
+        return s
+
+    def test_summarize_returns_narrative_insights_recommendations(self, mocker):
+        summarizer = self._make_summarizer()
+        tool_input = {
+            "narrative": "You spent **$2,100** this month.",
+            "insights": ["Food was the top category.", "No recurring charges changed."],
+            "recommendations": ["Reduce dining out."],
+        }
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _response(
+            [_tool_use_block("write_summary", tool_input)]
+        )
+        mocker.patch("budget.ai.anthropic.Anthropic", return_value=mock_client)
+        result = summarizer.summarize(
+            "February 2026", {"income": "3000", "expenses": "-2100"}
+        )
+        assert result["narrative"] == "You spent **$2,100** this month."
+        assert len(result["insights"]) == 2
+        assert result["recommendations"] == ["Reduce dining out."]
+
+    def test_summarize_raises_when_no_tool_block(self, mocker):
+        summarizer = self._make_summarizer()
+        text_block = MagicMock()
+        text_block.type = "text"
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _response(
+            [text_block], stop_reason="end_turn"
+        )
+        mocker.patch("budget.ai.anthropic.Anthropic", return_value=mock_client)
+        with pytest.raises(ValueError, match="No tool use block"):
+            summarizer.summarize("2025", {})
+
+    def test_summarize_includes_period_label_in_message(self, mocker):
+        summarizer = self._make_summarizer()
+        tool_input = {
+            "narrative": "Annual summary.",
+            "insights": ["Insight one."],
+            "recommendations": ["Rec one."],
+        }
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _response(
+            [_tool_use_block("write_summary", tool_input)]
+        )
+        mocker.patch("budget.ai.anthropic.Anthropic", return_value=mock_client)
+        summarizer.summarize("2025", {"income": "60000"})
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        user_content = call_kwargs["messages"][0]["content"]
+        assert "2025" in user_content
+        assert "60000" in user_content
+
+    def test_summarize_system_prompt_contains_markdown_instructions(self):
+        assert "**bold**" in SUMMARIZE_SYSTEM
+        assert "markdown" in SUMMARIZE_SYSTEM.lower()

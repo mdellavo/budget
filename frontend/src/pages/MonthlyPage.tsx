@@ -1,15 +1,30 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import AiSummaryCard from "../components/AiSummaryCard";
 import HelpIcon from "../components/HelpIcon";
 import SpendingChart from "../components/SpendingChart";
-import { listMonths, getMonthlyReport } from "../api/client";
+import { listMonths, getMonthlyReport, getMonthlyReportSummary } from "../api/client";
 import { formatCurrency, amountColor } from "../lib/format";
-import type { MonthlyReport } from "../types";
+import type { MonthlyReport, ReportSummary } from "../types";
 
 function formatMonth(ym: string): string {
   const [year, month] = ym.split("-");
   const date = new Date(Number(year), Number(month) - 1, 1);
   return date.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+function PctChange({ pct, invertColor = false }: { pct: number | null; invertColor?: boolean }) {
+  if (pct === null) return <span className="text-xs text-gray-300">—</span>;
+  const up = pct > 0;
+  const good = invertColor ? !up : up;
+  const colorClass = pct === 0 ? "text-gray-400" : good ? "text-green-600" : "text-red-600";
+  const sign = up ? "+" : "";
+  return (
+    <span className={`text-xs font-normal ${colorClass}`}>
+      {sign}
+      {pct.toFixed(1)}%
+    </span>
+  );
 }
 
 function monthParams(ym: string, extra?: Record<string, string>): string {
@@ -27,6 +42,8 @@ export default function MonthlyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedMonth = searchParams.get("month");
   const [report, setReport] = useState<MonthlyReport | null>(null);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [loadingMonths, setLoadingMonths] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +69,27 @@ export default function MonthlyPage() {
       .then((data) => setReport(data))
       .catch((e) => setError(e.message))
       .finally(() => setLoadingReport(false));
+  }, [selectedMonth]);
+
+  useEffect(() => {
+    if (!selectedMonth) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSummary(null);
+    setSummaryLoading(true);
+    getMonthlyReportSummary(selectedMonth)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [selectedMonth]);
+
+  const handleRegenerate = useCallback(() => {
+    if (!selectedMonth) return;
+    setSummary(null);
+    setSummaryLoading(true);
+    getMonthlyReportSummary(selectedMonth, true)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
   }, [selectedMonth]);
 
   // Group months by year
@@ -160,18 +198,21 @@ export default function MonthlyPage() {
                   <p className="text-lg font-semibold text-green-700">
                     {formatCurrency(report.summary.income)}
                   </p>
+                  <PctChange pct={report.summary.income_pct_change} />
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <p className="text-xs text-gray-500 mb-1">Expenses</p>
                   <p className="text-lg font-semibold text-red-600">
                     {formatCurrency(report.summary.expenses)}
                   </p>
+                  <PctChange pct={report.summary.expenses_pct_change} invertColor />
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <p className="text-xs text-gray-500 mb-1">Net</p>
                   <p className={`text-lg font-semibold ${amountColor(report.summary.net)}`}>
                     {formatCurrency(report.summary.net)}
                   </p>
+                  <PctChange pct={report.summary.net_pct_change} />
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <p className="text-xs text-gray-500 mb-1">Savings Rate</p>
@@ -183,6 +224,15 @@ export default function MonthlyPage() {
                 </div>
               </div>
             </div>
+
+            {/* AI Summary */}
+            {(summaryLoading || summary) && (
+              <AiSummaryCard
+                summary={summary}
+                loading={summaryLoading}
+                onRegenerate={handleRegenerate}
+              />
+            )}
 
             {/* Spending chart */}
             {report.category_breakdown.length > 0 && (
@@ -216,8 +266,13 @@ export default function MonthlyPage() {
                                 {cat.category}
                               </Link>
                             </td>
-                            <td className="px-4 py-2 text-right font-semibold text-red-600">
-                              {formatCurrency(cat.total)}
+                            <td className="px-4 py-2 font-semibold text-red-600 whitespace-nowrap">
+                              <div className="flex items-center justify-end">
+                                <span>{formatCurrency(cat.total)}</span>
+                                <div className="w-16 text-right shrink-0">
+                                  <PctChange pct={cat.pct_change} invertColor />
+                                </div>
+                              </div>
                             </td>
                           </tr>
                           {cat.subcategories.map((sub) => (
@@ -233,8 +288,13 @@ export default function MonthlyPage() {
                                   {sub.subcategory}
                                 </Link>
                               </td>
-                              <td className="px-4 py-1.5 text-right text-red-500">
-                                {formatCurrency(sub.total)}
+                              <td className="px-4 py-1.5 text-red-500 whitespace-nowrap">
+                                <div className="flex items-center justify-end">
+                                  <span>{formatCurrency(sub.total)}</span>
+                                  <div className="w-16 text-right shrink-0">
+                                    <PctChange pct={sub.pct_change} invertColor />
+                                  </div>
+                                </div>
                               </td>
                             </tr>
                           ))}

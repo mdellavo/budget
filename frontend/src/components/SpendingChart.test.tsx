@@ -14,15 +14,17 @@ const BREAKDOWN: CategoryBreakdown[] = [
   {
     category: "Food & Drink",
     total: "-800.00",
+    pct_change: 10.0,
     subcategories: [
-      { subcategory: "Restaurants", total: "-500.00" },
-      { subcategory: "Groceries", total: "-300.00" },
+      { subcategory: "Restaurants", total: "-500.00", pct_change: 5.0 },
+      { subcategory: "Groceries", total: "-300.00", pct_change: null },
     ],
   },
   {
     category: "Transport",
     total: "-200.00",
-    subcategories: [{ subcategory: "Fuel", total: "-200.00" }],
+    pct_change: null,
+    subcategories: [{ subcategory: "Fuel", total: "-200.00", pct_change: null }],
   },
 ];
 

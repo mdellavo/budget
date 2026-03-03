@@ -88,12 +88,14 @@ class ColumnDetector:
 detector = ColumnDetector()
 
 
-ENRICHMENT_PROMPT = """\
-You are a personal finance assistant. You will be given a list of bank transaction descriptions and must identify the merchant, spending category, and subcategory for each one.
+ENRICHMENT_SYSTEM = """\
+You are a personal finance assistant. You will be given a list of bank transaction descriptions \
+and must identify the merchant, spending category, and subcategory for each one.
 
-Bank descriptions are often truncated, uppercased, and contain store numbers or location codes. Use your knowledge to resolve unfamiliar merchants.
+Bank descriptions are often truncated, uppercased, and contain store numbers or location codes. \
+Use your knowledge to resolve unfamiliar merchants.
 
-Spending categories and subcategories to use (pick the best fit, suggest a subcategory if no matches exist):
+Spending categories and subcategories to use (pick the best fit, suggest a new subcategory if needed):
 
 Food & Drink: Groceries, Restaurants, Fast Food, Coffee & Tea, Bars & Alcohol, Food Delivery
 Shopping: Clothing, Electronics, Home & Garden, Online Shopping, Department Stores
@@ -113,8 +115,10 @@ Government & Fees: Taxes, DMV & Registration, Fines & Penalties, Postage & Shipp
 Giving: Charitable Donations, Gifts, Religious & Tithing
 Income: Paycheck, Freelance & Side Income, Reimbursement, Refund, Interest & Dividends
 Transfer: Credit Card Payment, Internal Transfer, Investment Contribution, Investment Withdrawal
-Other: Anything that doesn't fit the above categories
+Other: Anything that doesn't fit the above categories\
+"""
 
+ENRICHMENT_PROMPT = """\
 Transfers (excluded from income/expense totals — use for money moving between your own accounts):
 - Payment FROM a bank account TO a credit card → Transfer / Credit Card Payment
   e.g. "AUTOPAY PAYMENT", "CHASE CREDIT CRD AUTOPAY", "ONLINE PAYMENT THANK YOU"
@@ -125,52 +129,74 @@ Transfers (excluded from income/expense totals — use for money moving between 
 - Brokerage contributions/withdrawals → Transfer / Investment Contribution or Withdrawal
   e.g. "FIDELITY CONTRIBUTION", "VANGUARD TRANSFER IN"
 
+P2P payments (Venmo, Zelle, CashApp, PayPal, Apple Pay Cash):
+- Sending money to a person → Transfer / Internal Transfer; payment_channel = "p2p"
+  e.g. "VENMO PAYMENT TO JANE DOE", "ZELLE TO JOHN SMITH"
+- Receiving money from a person → Income / Reimbursement; payment_channel = "p2p"
+  e.g. "VENMO TRANSFER FROM JOHN", "ZELLE FROM SARAH"
+- Payment to a business via P2P platform → treat as merchant purchase; payment_channel = "purchase"
+  e.g. "PAYPAL *SHOPIFY STORE", "VENMO *ACME RESTAURANT"
+
+Refunds & credits:
+- If the description contains "REFUND", "RETURN", "CREDIT", "REVERSAL", "ADJUSTMENT",
+  or "CHARGEBACK" from a recognizable merchant, categorize under that merchant's original
+  category (not Income). Set is_refund = true and payment_channel = "refund".
+  e.g. "AMAZON REFUND" → Shopping / Online Shopping, is_refund=true
+  e.g. "UBER TRIP CREDIT" → Transportation / Rideshare, is_refund=true
+  e.g. "HOTEL CANCELLATION REFUND" → Travel / Hotels & Lodging, is_refund=true
+- Only use Income / Refund for vague credits with no identifiable merchant category.
+
+Seasonal date signals (soft hints — don't override clear description evidence):
+- November–December transactions at retailers → consider Giving / Gifts
+- April transactions to "IRS", "STATE TAX", "FRANCHISE TAX" → Government & Fees / Taxes
+- Annual subscription charges on a recurring date → is_recurring = true
+
 Rules:
 - merchant_name: canonical business name, Title Case, no location codes or store numbers
   e.g. "STARBUCKS #4821 SEATTLE WA" → "Starbucks"
   e.g. "AMZN MKTP US*1A2B3" → "Amazon"
-- is_recurring: true if (a) the description explicitly contains words like "recurring", "subscription",
-  "membership", "autopay", "autorenew", or similar; OR (b) the merchant is clearly a subscription
-  or regularly-recurring service (streaming, SaaS, rent, gym, insurance, utilities).
-  false for one-off purchases: restaurants, retail, rideshare, ATM, etc.
-  e.g. "RECURRING PAYMENT GEICO" → true  (explicit keyword)
-  e.g. "AUTOPAY VERIZON WIRELESS" → true  (explicit keyword)
-  e.g. "NETFLIX.COM" → true  (known subscription)
-  e.g. "SPOTIFY USA" → true
-  e.g. "APPLE.COM/BILL" → true
-  e.g. "GITHUB" → true
-  e.g. "STARBUCKS #4821" → false
-  e.g. "AMAZON.COM*1A2B3" → false
-  e.g. "UBER TRIP" → false
-- merchant_location: extract location from the raw description only if explicitly present.
-  Format "City, ST" for US (e.g. "Seattle, WA"), "City, Country" for international.
-  If no location appears in the raw text, set to null. Do NOT infer from general knowledge.
-  e.g. "STARBUCKS #4821 SEATTLE WA" → "Seattle, WA"
-  e.g. "AMZN MKTP US*1A2B3" → null
-  e.g. "SQ *FARMERS MARKET BROOKLYN NY" → "Brooklyn, NY"
-- card_number: if the raw description contains "CARD XXXX" or "CARDXXXX" where XXXX is digits, extract those digits. Otherwise null.
-  e.g. "POS PURCHASE CARD 1234 STARBUCKS" → "1234"
-  e.g. "ACH DEBIT CARD5678 NETFLIX" → "5678"
-  e.g. "STARBUCKS #4821" → null
-- merchant_website: the primary domain of the merchant (e.g. "netflix.com", "homedepot.com"). Bare domain only — no https:// or www. If unknown, set to null.
-- description: a short, human-readable summary of the transaction, Title Case
-  Strip noise (store numbers, location codes, transaction IDs). If the raw description is already clean, keep it.
+- is_recurring: true if (a) description explicitly contains "recurring", "subscription",
+  "membership", "autopay", "auto pay", "autorenew", "auto renew", "annual renewal",
+  "monthly", "yearly", "renew", "renewal", "auto-pay", "autorenew"; OR (b) the merchant
+  is clearly a subscription or regularly-recurring service (streaming, SaaS, rent, gym,
+  insurance, utilities, loan payments). false for one-off purchases.
+  e.g. "RECURRING PAYMENT GEICO" → true, "NETFLIX.COM" → true, "GITHUB" → true
+  e.g. "STARBUCKS #4821" → false, "UBER TRIP" → false
+- is_refund: true if this is a refund, return, credit, or reversal (see Refunds above).
+- is_international: true if the description contains a non-US country name, international
+  city, "INTL", "FOREIGN", "FX", or a non-US currency code (GBP, EUR, CAD, AUD, JPY, etc.).
+  e.g. "AIRBNB * LISBON PT" → true, "REVOLUT* LONDON GB" → true, "FOREIGN TRANSACTION FEE" → true
+  e.g. "STARBUCKS SEATTLE WA" → false
+- payment_channel: how money moved:
+    "purchase"  — normal card/ACH purchase at a merchant
+    "refund"    — credit back from a merchant (set is_refund=true too)
+    "fee"       — bank or service fee (overdraft, wire fee, late fee, ATM fee)
+    "interest"  — interest charge or dividend/interest income
+    "p2p"       — Venmo/Zelle/CashApp/PayPal/Apple Pay Cash person-to-person
+    "atm"       — cash ATM withdrawal (not an ATM fee)
+    "transfer"  — account-to-account, credit card payment, brokerage contribution
+    "payroll"   — direct deposit / paycheck / employer payment
+- merchant_location: extract from raw description only if explicitly present.
+  Format "City, ST" for US, "City, Country" for international. Null if not in text.
+  e.g. "STARBUCKS #4821 SEATTLE WA" → "Seattle, WA"; "AMZN MKTP US*1A2B3" → null
+- card_number: if raw description contains "CARD XXXX" or "CARDXXXX" extract those digits, else null.
+- merchant_website: bare primary domain (e.g. "netflix.com"). No https:// or www. Null if unknown.
+- description: short human-readable summary, Title Case. Strip store numbers, IDs, location codes.
   e.g. "STARBUCKS #4821 SEATTLE WA" → "Starbucks Coffee"
-  e.g. "SQ *FARMERS MARKET 123" → "Farmers Market"
-  e.g. "GITHUB.COM/SPONSORS" → "GitHub Sponsors"
-- ATM withdrawals vs ATM fees: descriptions containing "WITHDRAWAL" or "CASH WITHDRAWAL" are cash
-  taken out → Cash & ATM / ATM Withdrawal. Descriptions containing "FEE", "CHARGE", or
-  "TRANSACTION FEE" related to ATM usage are bank charges → Financial / ATM Fees.
-  e.g. "NON-WF ATM WITHDRAWAL" → Cash & ATM / ATM Withdrawal
-  e.g. "NON-WELLS FARGO ATM TRANSACTION FEE" → Financial / ATM Fees
+- suggested_tags: 0–3 short lowercase tags relevant to this specific transaction.
+  Only suggest when clearly applicable. Good tags: "work-expense", "tax-deductible",
+  "reimbursable", "home-office", "travel", "health", "gift", "subscription", "cash".
+  Empty array if nothing clearly applies.
+- ATM withdrawals vs fees: "WITHDRAWAL"/"CASH WITHDRAWAL" → Cash & ATM / ATM Withdrawal.
+  "FEE"/"CHARGE"/"TRANSACTION FEE" for ATM → Financial / ATM Fees.
 - Positive amounts are typically income/credits; negative amounts are expenses.
 - If a merchant cannot be identified, set merchant_name to null.
-- subcategory must be one of the values listed under the chosen category above.
-- need_want: Classify this specific subcategory as a "need" (essential, non-negotiable) or
-  "want" (discretionary). Classify at the subcategory level — within the same parent category,
-  some subcategories can be needs while others are wants (e.g. Groceries = need, but
-  Food Delivery and Restaurants = want, even though all are under Food & Drink).
-- Return a result for every transaction index provided — do not skip any.
+- subcategory must be one of the values listed under the chosen category.
+- need_want: "need" (essential) or "want" (discretionary) at the subcategory level.
+  Needs: groceries, utilities, rent/mortgage, healthcare, insurance, loan repayments, education,
+  childcare, commuting. Wants: dining out, food delivery, entertainment, travel, shopping,
+  hobbies, streaming, personal luxuries. When ambiguous, lean toward "need".
+- Return a result for every transaction index — do not skip any.
 
 Transactions:
 {transactions}"""
@@ -188,6 +214,26 @@ ENRICHMENT_SCHEMA = {
                     "merchant_location": {"type": ["string", "null"]},
                     "merchant_website": {"type": ["string", "null"]},
                     "is_recurring": {"type": "boolean"},
+                    "is_refund": {"type": "boolean"},
+                    "is_international": {"type": "boolean"},
+                    "payment_channel": {
+                        "type": "string",
+                        "enum": [
+                            "purchase",
+                            "refund",
+                            "fee",
+                            "interest",
+                            "p2p",
+                            "atm",
+                            "transfer",
+                            "payroll",
+                        ],
+                    },
+                    "suggested_tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "0-3 short lowercase tags. Empty array if none apply.",
+                    },
                     "description": {"type": "string"},
                     "category": {"type": ["string", "null"]},
                     "subcategory": {"type": ["string", "null"]},
@@ -212,6 +258,10 @@ ENRICHMENT_SCHEMA = {
                     "merchant_location",
                     "merchant_website",
                     "is_recurring",
+                    "is_refund",
+                    "is_international",
+                    "payment_channel",
+                    "suggested_tags",
                     "description",
                     "category",
                     "subcategory",
@@ -258,6 +308,7 @@ class TransactionEnricher:
             response = self.client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=16384,
+                system=ENRICHMENT_SYSTEM,
                 tools=tools,
                 tool_choice={"type": "any"},
                 messages=messages,
@@ -464,3 +515,76 @@ class MerchantDuplicateFinder:
 
 
 merchant_duplicate_finder = MerchantDuplicateFinder()
+
+
+SUMMARIZE_SYSTEM = """\
+You are a personal finance analyst. You will receive structured financial data \
+for a specific time period and write a concise summary to help the user understand \
+their finances. Be specific, reference actual numbers, and keep recommendations \
+actionable. Avoid generic platitudes.
+
+Use light markdown formatting in your response:
+- Use **bold** to highlight key figures, dollar amounts, and important terms
+- Use *italics* sparingly for emphasis
+- Write naturally — avoid excessive formatting or nested structure\
+"""
+
+SUMMARIZE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "narrative": {
+            "type": "string",
+            "description": "2-3 sentence plain-English overview of the period. Use **bold** for key figures and dollar amounts.",
+        },
+        "insights": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-5 specific observations about spending, income, or trends. Each item may use **bold** for emphasis.",
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "2-3 concise, actionable financial recommendations. Each item may use **bold** for emphasis.",
+        },
+    },
+    "required": ["narrative", "insights", "recommendations"],
+}
+
+
+class ReportSummarizer:
+    model = "claude-haiku-4-5-20251001"
+
+    def summarize(self, period_label: str, report_data: dict) -> dict:
+        """
+        period_label: human-readable string e.g. "February 2026" or "2025"
+        report_data:  the full monthly/yearly report dict (summary + category_breakdown)
+        Returns: { narrative, insights, recommendations }
+        """
+        import json
+
+        client = anthropic.Anthropic()
+        user_content = (
+            f"Period: {period_label}\n\n"
+            f"Financial data:\n{json.dumps(report_data, indent=2)}"
+        )
+        response = client.messages.create(  # type: ignore[call-overload]
+            model=self.model,
+            max_tokens=1024,
+            system=SUMMARIZE_SYSTEM,
+            tools=[
+                {
+                    "name": "write_summary",
+                    "description": "Write a financial summary with insights and recommendations",
+                    "input_schema": SUMMARIZE_INPUT_SCHEMA,
+                }
+            ],
+            tool_choice={"type": "any"},
+            messages=[{"role": "user", "content": user_content}],
+        )
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "write_summary":
+                return block.input
+        raise ValueError("No tool use block returned from Claude")
+
+
+report_summarizer = ReportSummarizer()

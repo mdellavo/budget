@@ -29,12 +29,16 @@ const YEARLY_REPORT = {
     expenses: "-42000.00",
     net: "18000.00",
     savings_rate: 30.0,
+    income_pct_change: 20.0,
+    expenses_pct_change: -15.5,
+    net_pct_change: 37.1,
   },
   category_breakdown: [
     {
       category: "Food & Drink",
       total: "-12000.00",
-      subcategories: [{ subcategory: "Restaurants", total: "-8000.00" }],
+      pct_change: 25.0,
+      subcategories: [{ subcategory: "Restaurants", total: "-8000.00", pct_change: 33.3 }],
     },
   ],
 };
@@ -148,5 +152,76 @@ describe("YearlyPage", () => {
     );
     renderPage();
     await screen.findByText(/API 500/);
+  });
+
+  it("shows pct change chips when pct change values are non-null", async () => {
+    server.use(
+      http.get("/api/yearly", () => HttpResponse.json(YEARS_RESPONSE)),
+      http.get("/api/yearly/:year", () => HttpResponse.json(YEARLY_REPORT))
+    );
+    renderPage("/yearly?year=2024");
+    await screen.findByText("Annual report");
+    expect(screen.getByText("+20.0%")).toBeInTheDocument();
+    expect(screen.getByText("-15.5%")).toBeInTheDocument();
+    expect(screen.getByText("+37.1%")).toBeInTheDocument();
+  });
+
+  it("shows no pct change chips when all pct change values are null", async () => {
+    const reportNoPct = {
+      ...YEARLY_REPORT,
+      summary: {
+        ...YEARLY_REPORT.summary,
+        income_pct_change: null,
+        expenses_pct_change: null,
+        net_pct_change: null,
+      },
+      category_breakdown: [
+        {
+          category: "Food & Drink",
+          total: "-12000.00",
+          pct_change: null,
+          subcategories: [{ subcategory: "Restaurants", total: "-8000.00", pct_change: null }],
+        },
+      ],
+    };
+    server.use(
+      http.get("/api/yearly", () => HttpResponse.json(YEARS_RESPONSE)),
+      http.get("/api/yearly/:year", () => HttpResponse.json(reportNoPct))
+    );
+    renderPage("/yearly?year=2024");
+    await screen.findByText("Annual report");
+    expect(screen.queryByText(/[+-]\d+\.\d+%/)).toBeNull();
+  });
+
+  it("shows pct change chips next to category and subcategory amounts", async () => {
+    server.use(
+      http.get("/api/yearly", () => HttpResponse.json(YEARS_RESPONSE)),
+      http.get("/api/yearly/:year", () => HttpResponse.json(YEARLY_REPORT))
+    );
+    renderPage("/yearly?year=2024");
+    await screen.findByText("Food & Drink");
+    // Category pct_change: +25.0%
+    expect(screen.getByText("+25.0%")).toBeInTheDocument();
+    // Subcategory pct_change: +33.3%
+    expect(screen.getByText("+33.3%")).toBeInTheDocument();
+  });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/yearly", () => HttpResponse.json(YEARS_RESPONSE)),
+      http.get("/api/yearly/:year", () => HttpResponse.json(YEARLY_REPORT)),
+      http.get("/api/yearly/:year/summary", () =>
+        HttpResponse.json({
+          narrative: "You saved **$18,000** this year.",
+          insights: ["Income grew 20% year-over-year.", "Food & Drink remained top expense."],
+          recommendations: ["Increase emergency fund contributions."],
+        })
+      )
+    );
+    renderPage("/yearly?year=2024");
+    await screen.findByText("AI Summary");
+    expect(screen.getByText("Key Insights")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("Income grew 20% year-over-year.");
+    expect(document.body.textContent).toContain("Increase emergency fund contributions.");
   });
 });

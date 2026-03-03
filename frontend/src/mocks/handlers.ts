@@ -57,4 +57,7 @@ export const handlers = [
       category_breakdown: [],
     })
   ),
+  http.get("/api/monthly/:month/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/yearly/:year/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/overview/summary", () => HttpResponse.json(null, { status: 502 })),
 ];

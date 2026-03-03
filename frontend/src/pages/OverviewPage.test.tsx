@@ -91,4 +91,26 @@ describe("OverviewPage", () => {
     );
     await screen.findByText(/API 500/);
   });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/overview", () => HttpResponse.json(OVERVIEW_DATA)),
+      http.get("/api/overview/summary", () =>
+        HttpResponse.json({
+          narrative: "Overall you saved **$1,800** across the period.",
+          insights: ["Income was steady.", "Expenses were controlled."],
+          recommendations: ["Build an emergency fund."],
+        })
+      )
+    );
+    render(
+      <MemoryRouter>
+        <OverviewPage />
+      </MemoryRouter>
+    );
+    await screen.findByText("AI Summary");
+    expect(screen.getByText("Key Insights")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("Income was steady.");
+    expect(document.body.textContent).toContain("Build an emergency fund.");
+  });
 });

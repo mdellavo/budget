@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -29,12 +29,16 @@ const MONTHLY_REPORT = {
     expenses: "-2100.00",
     net: "900.00",
     savings_rate: 30.0,
+    income_pct_change: 12.3,
+    expenses_pct_change: -5.0,
+    net_pct_change: 8.7,
   },
   category_breakdown: [
     {
       category: "Food",
       total: "-800.00",
-      subcategories: [{ subcategory: "Groceries", total: "-600.00" }],
+      pct_change: 14.3,
+      subcategories: [{ subcategory: "Groceries", total: "-600.00", pct_change: 20.0 }],
     },
   ],
 };
@@ -150,5 +154,87 @@ describe("MonthlyPage", () => {
     );
     renderPage("/monthly?month=2026-02");
     await screen.findByText(/No categorized spending this month/i);
+  });
+
+  it("shows pct change chips when pct change values are non-null", async () => {
+    server.use(
+      http.get("/api/monthly", () => HttpResponse.json(MONTHS_RESPONSE)),
+      http.get("/api/monthly/:month", () => HttpResponse.json(MONTHLY_REPORT))
+    );
+    renderPage("/monthly?month=2026-02");
+    await screen.findByText("February 2026");
+    expect(screen.getByText("+12.3%")).toBeInTheDocument();
+    expect(screen.getByText("-5.0%")).toBeInTheDocument();
+    expect(screen.getByText("+8.7%")).toBeInTheDocument();
+  });
+
+  it("shows no pct change chips when all pct change values are null", async () => {
+    const reportNoPct = {
+      ...MONTHLY_REPORT,
+      summary: {
+        ...MONTHLY_REPORT.summary,
+        income_pct_change: null,
+        expenses_pct_change: null,
+        net_pct_change: null,
+      },
+      category_breakdown: [
+        {
+          category: "Food",
+          total: "-800.00",
+          pct_change: null,
+          subcategories: [{ subcategory: "Groceries", total: "-600.00", pct_change: null }],
+        },
+      ],
+    };
+    server.use(
+      http.get("/api/monthly", () => HttpResponse.json(MONTHS_RESPONSE)),
+      http.get("/api/monthly/:month", () => HttpResponse.json(reportNoPct))
+    );
+    renderPage("/monthly?month=2026-02");
+    await screen.findByText("February 2026");
+    expect(screen.queryByText(/[+-]\d+\.\d+%/)).toBeNull();
+  });
+
+  it("shows pct change chips next to category and subcategory amounts", async () => {
+    server.use(
+      http.get("/api/monthly", () => HttpResponse.json(MONTHS_RESPONSE)),
+      http.get("/api/monthly/:month", () => HttpResponse.json(MONTHLY_REPORT))
+    );
+    renderPage("/monthly?month=2026-02");
+    await screen.findByText("Food");
+    // Category pct_change: +14.3%
+    expect(screen.getByText("+14.3%")).toBeInTheDocument();
+    // Subcategory pct_change: +20.0%
+    expect(screen.getByText("+20.0%")).toBeInTheDocument();
+  });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/monthly", () => HttpResponse.json(MONTHS_RESPONSE)),
+      http.get("/api/monthly/:month", () => HttpResponse.json(MONTHLY_REPORT)),
+      http.get("/api/monthly/:month/summary", () =>
+        HttpResponse.json({
+          narrative: "You spent **$2,100** this month.",
+          insights: ["Food spending was highest.", "No anomalies detected."],
+          recommendations: ["Reduce dining out."],
+        })
+      )
+    );
+    renderPage("/monthly?month=2026-02");
+    await screen.findByText("AI Summary");
+    expect(screen.getByText("Key Insights")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("Food spending was highest.");
+    expect(document.body.textContent).toContain("Reduce dining out.");
+  });
+
+  it("does not show AI summary card when summary API fails", async () => {
+    server.use(
+      http.get("/api/monthly", () => HttpResponse.json(MONTHS_RESPONSE)),
+      http.get("/api/monthly/:month", () => HttpResponse.json(MONTHLY_REPORT))
+      // summary handler defaults to 502 — page silently ignores the error
+    );
+    renderPage("/monthly?month=2026-02");
+    await screen.findByText("February 2026");
+    await waitFor(() => expect(screen.queryByText("AI Summary")).not.toBeInTheDocument());
   });
 });

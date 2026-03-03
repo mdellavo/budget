@@ -32,6 +32,18 @@ export interface TransactionItem {
   subcategory: string | null;
   notes: string | null;
   is_recurring: boolean;
+  is_refund: boolean;
+  is_international: boolean;
+  payment_channel:
+    | "purchase"
+    | "refund"
+    | "fee"
+    | "interest"
+    | "p2p"
+    | "atm"
+    | "transfer"
+    | "payroll"
+    | null;
   raw_description: string | null;
   cardholder_name: string | null;
   card_number: string | null;
@@ -173,11 +185,13 @@ export interface MonthListResponse {
 export interface SubcategoryBreakdown {
   subcategory: string;
   total: string;
+  pct_change: number | null;
 }
 
 export interface CategoryBreakdown {
   category: string;
   total: string;
+  pct_change: number | null;
   subcategories: SubcategoryBreakdown[];
 }
 
@@ -189,6 +203,9 @@ export interface MonthlyReport {
     expenses: string;
     net: string;
     savings_rate: number | null;
+    income_pct_change: number | null;
+    expenses_pct_change: number | null;
+    net_pct_change: number | null;
   };
   category_breakdown: CategoryBreakdown[];
 }
@@ -205,8 +222,17 @@ export interface YearlyReport {
     expenses: string;
     net: string;
     savings_rate: number | null;
+    income_pct_change: number | null;
+    expenses_pct_change: number | null;
+    net_pct_change: number | null;
   };
   category_breakdown: CategoryBreakdown[];
+}
+
+export interface ReportSummary {
+  narrative: string;
+  insights: string[];
+  recommendations: string[];
 }
 
 export interface SankeyNode {

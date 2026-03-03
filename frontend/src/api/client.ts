@@ -16,6 +16,7 @@ import type {
   MonthlyReport,
   OverviewData,
   RecurringData,
+  ReportSummary,
   TransactionItem,
   TransactionsResponse,
   WizardResponse,
@@ -114,6 +115,9 @@ export interface TransactionFilters {
   account?: string;
   import_id?: number;
   is_recurring?: boolean;
+  is_refund?: boolean;
+  is_international?: boolean;
+  payment_channel?: string;
   uncategorized?: boolean;
   cardholder?: string;
   tag?: string;
@@ -287,6 +291,37 @@ export async function listYears(): Promise<YearListResponse> {
 export async function getYearlyReport(year: string): Promise<YearlyReport> {
   return handleResponse<YearlyReport>(
     await fetch(`${BASE}/yearly/${year}`, { headers: authHeaders() })
+  );
+}
+
+export async function getMonthlyReportSummary(
+  month: string,
+  force = false
+): Promise<ReportSummary> {
+  const url = force
+    ? `${BASE}/monthly/${month}/summary?force=true`
+    : `${BASE}/monthly/${month}/summary`;
+  return handleResponse<ReportSummary>(await fetch(url, { headers: authHeaders() }));
+}
+
+export async function getYearlyReportSummary(year: string, force = false): Promise<ReportSummary> {
+  const url = force
+    ? `${BASE}/yearly/${year}/summary?force=true`
+    : `${BASE}/yearly/${year}/summary`;
+  return handleResponse<ReportSummary>(await fetch(url, { headers: authHeaders() }));
+}
+
+export async function getOverviewSummary(
+  params: { date_from?: string; date_to?: string } = {},
+  force = false
+): Promise<ReportSummary> {
+  const qs = new URLSearchParams();
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  if (force) qs.set("force", "true");
+  const q = qs.toString();
+  return handleResponse<ReportSummary>(
+    await fetch(`${BASE}/overview/summary${q ? `?${q}` : ""}`, { headers: authHeaders() })
   );
 }
 

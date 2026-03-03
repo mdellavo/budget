@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { getOverview, listMonths } from "../api/client";
+import { getOverview, getOverviewSummary, listMonths } from "../api/client";
+import AiSummaryCard from "../components/AiSummaryCard";
 import HelpIcon from "../components/HelpIcon";
-import type { OverviewData, SankeyNode } from "../types";
+import type { OverviewData, ReportSummary, SankeyNode } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
 function formatCurrency(amount: string) {
@@ -49,6 +50,8 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [months, setMonths] = useState<string[]>([]);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   // Filter state lives in the URL so the back button restores it.
   const fromMonth = searchParams.get("from") ?? "";
@@ -72,7 +75,6 @@ export default function OverviewPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
     const date_from = fromMonth ? monthToDateFrom(fromMonth) : undefined;
     const date_to = toMonth ? monthToDateTo(toMonth) : undefined;
@@ -80,7 +82,27 @@ export default function OverviewPage() {
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+
+    // Fetch AI summary in parallel with overview data
+    setSummary(null);
+    setSummaryLoading(true);
+    getOverviewSummary({ date_from, date_to })
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
   }, [fromMonth, toMonth]);
+
+  const dateFrom = fromMonth ? monthToDateFrom(fromMonth) : undefined;
+  const dateTo = toMonth ? monthToDateTo(toMonth) : undefined;
+
+  const handleRegenerateSummary = useCallback(() => {
+    setSummary(null);
+    setSummaryLoading(true);
+    getOverviewSummary({ date_from: dateFrom, date_to: dateTo }, true)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [dateFrom, dateTo]);
 
   // Replace the current history entry so filter tweaks don't litter the stack.
   // Navigation away (clicking a category) pushes a new entry on top, so the
@@ -97,13 +119,10 @@ export default function OverviewPage() {
     }
   }
 
-  const chartDateFrom = fromMonth ? monthToDateFrom(fromMonth) : undefined;
-  const chartDateTo = toMonth ? monthToDateTo(toMonth) : undefined;
-
   function categoryUrl(name: string): string {
     const p = new URLSearchParams();
-    if (chartDateFrom) p.set("date_from", chartDateFrom);
-    if (chartDateTo) p.set("date_to", chartDateTo);
+    if (dateFrom) p.set("date_from", dateFrom);
+    if (dateTo) p.set("date_to", dateTo);
     p.set("category", name);
     return `/transactions?${p.toString()}`;
   }
@@ -267,6 +286,16 @@ export default function OverviewPage() {
             </div>
           )}
 
+          {/* AI Summary */}
+          {(summaryLoading || summary) && (
+            <AiSummaryCard
+              summary={summary}
+              loading={summaryLoading}
+              onRegenerate={handleRegenerateSummary}
+              className="mt-6"
+            />
+          )}
+
           {data.sankey.income_sources.length > 0 && (
             <div className="mt-8">
               <h2 className="text-lg font-semibold text-gray-800 mb-1">Money Flow</h2>
@@ -276,8 +305,8 @@ export default function OverviewPage() {
                 expenseCategories={data.sankey.expense_categories}
                 net={data.net}
                 totalIncome={data.income}
-                dateFrom={chartDateFrom}
-                dateTo={chartDateTo}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
               />
               <details className="mt-4 text-sm text-gray-600">
                 <summary className="cursor-pointer font-medium text-gray-700 hover:text-gray-900">
@@ -302,8 +331,8 @@ export default function OverviewPage() {
               <DonutChart
                 categories={data.expense_breakdown}
                 totalExpenses={data.expenses}
-                dateFrom={chartDateFrom}
-                dateTo={chartDateTo}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
               />
             </div>
           )}
