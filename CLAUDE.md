@@ -5,7 +5,7 @@ Personal finance app for importing, enriching, and analysing bank transactions.
 ## Stack
 
 - **Backend**: Python 3.13, FastAPI (async), SQLAlchemy (async), SQLite via aiosqlite
-- **AI**: Anthropic SDK — Claude used for CSV column detection, transaction enrichment, natural-language query parsing, and merchant deduplication
+- **AI**: Anthropic SDK — Claude used for CSV column detection, transaction enrichment, natural-language query parsing, merchant deduplication, and report summarization
 - **Frontend**: React 18, TypeScript, React Router 6, Tailwind CSS 4, Vite, Plotly.js
 
 ## Dev
@@ -56,6 +56,8 @@ nvm use node                  # select correct Node version first
 
 Fixtures are in `tests/conftest.py`: `make_account`, `make_merchant`, `make_category`, `make_transaction`, plus an async `client` using `httpx.AsyncClient`.
 
+GitHub Actions CI (`.github/workflows/ci.yml`) runs all backend and frontend checks on every push and PR.
+
 ## Code quality
 
 Pre-commit hooks (run automatically on commit):
@@ -81,6 +83,16 @@ npm run format:check    # Prettier (check only — used by pre-commit)
 ```
 
 Config files: `frontend/eslint.config.js` (ESLint 9 flat config with typescript-eslint, react-hooks, react-refresh, prettier); `frontend/.prettierrc` (semi, double quotes, 2-space indent, trailing commas, printWidth 100).
+
+## When making changes
+
+For every user-facing change, update all three of the following before considering the task done:
+
+- **Tests** — add or update tests that cover the changed behaviour (backend: `tests/`, frontend: `frontend/src/**/*.test.tsx`)
+- **Help page** (`frontend/src/pages/HelpPage.tsx`) — update the relevant section so the in-app documentation stays accurate
+- **README** (`README.md`) — update the Features section if end-user behaviour changes
+
+For structural or architectural changes, also update the Architecture section of this file.
 
 ## Architecture
 
@@ -109,12 +121,14 @@ Account → CsvImport → Transaction → Merchant
 
 All query classes take an `AsyncSession` and are instantiated per-request:
 
-- `AnalyticsQueries` — recurring, monthly, overview, category breakdown
+- `AnalyticsQueries` — recurring, monthly, yearly, overview, category breakdown
 - `AccountQueries` — account CRUD + cursor pagination
 - `CsvImportQueries` — import tracking and enrichment progress
 - `MerchantQueries` — merchant CRUD, stats, merge, duplicate detection; pagination via `.paginate()` (not `.list()` — name was reserved due to a mypy conflict)
 - `CategoryQueries` — category/subcategory lookup and creation
 - `TransactionQueries` — flexible filtering + cursor pagination
+- `BudgetQueries` — budget CRUD and spending rollup
+- `AiSummaryCacheQueries` — read/write cached AI summaries; keyed by `(user_id, period_type, period_key)` where `period_type` is `'monthly'`, `'yearly'`, or `'overview'` and `period_key` is e.g. `'2026-02'`, `'2026'`, or `'2026-01-01:2026-03-02'`; call `.invalidate_all()` after enrichment or transaction edits
 
 Pagination is cursor-based (keyset) via `after_id`. All paginated methods return `(items, has_more, next_cursor)`.
 
@@ -126,6 +140,7 @@ Pagination is cursor-based (keyset) via `after_id`. All paginated methods return
 | `TransactionEnricher` | sonnet-4-6 | Batch-enriches transactions: merchant, category, subcategory, `is_recurring`, cleaned description |
 | `QueryParser` | haiku-4-5 | Parses natural-language queries into filter params |
 | `MerchantDuplicateFinder` | haiku-4-5 | Identifies groups of duplicate merchant names |
+| `ReportSummarizer` | haiku-4-5 | Generates `{narrative, insights, recommendations}` for monthly, yearly, and overview reports; results cached in `AiSummaryCache` |
 
 Enrichment runs in a `BackgroundTask`: batches of 50, up to 3 concurrent, with retry (3 attempts, exponential backoff).
 
@@ -138,6 +153,9 @@ Enrichment runs in a `BackgroundTask`: batches of 50, up to 3 concurrent, with r
 ### Frontend layout
 
 Pages in `frontend/src/pages/`. API calls via typed client in `frontend/src/api/client.ts` (base path `/api`). Routes defined in `App.tsx`.
+
+- `frontend/src/components/SpendingChart.tsx` — reusable Plotly sunburst chart used by both Monthly and Yearly pages
+- `frontend/src/lib/format.ts` — shared `formatCurrency`, `amountColor`, and `parseAmount` helpers; `parseAmount` converts decimal strings to integer cents for safe fixed-point arithmetic
 
 ## Known caveats
 

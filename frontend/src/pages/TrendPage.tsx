@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import HelpIcon from "../components/HelpIcon";
-import { getCategoryTrends } from "../api/client";
-import type { CategoryTrendItem } from "../types";
+import AiSummaryCard from "../components/AiSummaryCard";
+import { getCategoryTrends, getTrendSummary } from "../api/client";
+import type { CategoryTrendItem, ReportSummary } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
 declare const Plotly: {
@@ -48,6 +49,8 @@ export default function TrendPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const divRef = useRef<HTMLDivElement>(null);
+  const [aiSummary, setAiSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -65,6 +68,26 @@ export default function TrendPage() {
       .then((data) => setItems(data.items))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  }, [activeFrom, activeTo]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAiSummary(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSummaryLoading(true);
+    getTrendSummary({ date_from: activeFrom, date_to: activeTo })
+      .then(setAiSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [activeFrom, activeTo]);
+
+  const handleRegenerateSummary = useCallback(() => {
+    setAiSummary(null);
+    setSummaryLoading(true);
+    getTrendSummary({ date_from: activeFrom, date_to: activeTo }, true)
+      .then(setAiSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
   }, [activeFrom, activeTo]);
 
   const { traces, layout } = useMemo(() => {
@@ -153,6 +176,14 @@ export default function TrendPage() {
             Apply
           </button>
         </form>
+
+        {(summaryLoading || aiSummary) && (
+          <AiSummaryCard
+            summary={aiSummary}
+            loading={summaryLoading}
+            onRegenerate={handleRegenerateSummary}
+          />
+        )}
 
         {/* Status / chart */}
         {error && (

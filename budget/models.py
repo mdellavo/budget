@@ -203,6 +203,12 @@ class Transaction(Base):
     is_recurring: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"
     )
+    is_refund: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    is_international: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+    payment_channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # values: 'purchase' | 'refund' | 'fee' | 'interest' | 'p2p' | 'atm' | 'transfer' | 'payroll'
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="transactions")
@@ -218,3 +224,20 @@ class Transaction(Base):
     tags: Mapped[list[Tag]] = relationship(
         secondary=transaction_tags, back_populates="transactions"
     )
+
+
+class AiSummaryCache(Base):
+    __tablename__ = "ai_summary_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    period_type: Mapped[str] = mapped_column(
+        String(10)
+    )  # 'monthly' | 'yearly' | 'overview'
+    period_key: Mapped[str] = mapped_column(
+        String(50)
+    )  # '2026-02' | '2026' | 'YYYY-MM-DD:YYYY-MM-DD' | 'all'
+    summary_json: Mapped[str] = mapped_column(String(8000))
+    generated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "period_type", "period_key"),)

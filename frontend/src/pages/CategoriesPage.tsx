@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import HelpIcon from "../components/HelpIcon";
+import AiSummaryCard from "../components/AiSummaryCard";
 import {
   listCategories,
   setCategoryClassification,
   setSubcategoryClassification,
+  getCategoriesSummary,
 } from "../api/client";
 import type { CategoryFilters } from "../api/client";
-import type { CategoryClassification, CategoryItem } from "../types";
+import type { CategoryClassification, CategoryItem, ReportSummary } from "../types";
 import type { Data, Layout, Config } from "plotly.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -292,6 +294,8 @@ export default function CategoriesPage() {
   const [rows, setRows] = useState<CategoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   const fetchRows = useCallback(async (formFilters: FormFilters) => {
     setLoading(true);
@@ -314,6 +318,32 @@ export default function CategoriesPage() {
   useEffect(() => {
     fetchRows(appliedFilters);
   }, [appliedFilters, fetchRows]);
+
+  useEffect(() => {
+    setSummary(null);
+    setSummaryLoading(true);
+    const params = {
+      ...(appliedFilters.date_from ? { date_from: appliedFilters.date_from } : {}),
+      ...(appliedFilters.date_to ? { date_to: appliedFilters.date_to } : {}),
+    };
+    getCategoriesSummary(params)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [appliedFilters.date_from, appliedFilters.date_to]);
+
+  const handleRegenerateSummary = useCallback(() => {
+    setSummary(null);
+    setSummaryLoading(true);
+    const params = {
+      ...(appliedFilters.date_from ? { date_from: appliedFilters.date_from } : {}),
+      ...(appliedFilters.date_to ? { date_to: appliedFilters.date_to } : {}),
+    };
+    getCategoriesSummary(params, true)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [appliedFilters.date_from, appliedFilters.date_to]);
 
   const [classificationOverrides, setClassificationOverrides] = useState<
     Record<number, CategoryClassification>
@@ -491,6 +521,16 @@ export default function CategoriesPage() {
         <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
           {error}
         </div>
+      )}
+
+      {/* AI Summary */}
+      {(summaryLoading || summary) && (
+        <AiSummaryCard
+          summary={summary}
+          loading={summaryLoading}
+          onRegenerate={handleRegenerateSummary}
+          className="mb-6"
+        />
       )}
 
       {/* Loading state */}

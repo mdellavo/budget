@@ -145,4 +145,26 @@ describe("CategoriesPage", () => {
     await user.selectOptions(sortSelect, "transaction_count");
     expect((sortSelect as HTMLSelectElement).value).toBe("transaction_count");
   });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/categories/summary", () =>
+        HttpResponse.json({
+          narrative: "Food dominates your spending.",
+          insights: ["Food & Drink is 60% of expenses."],
+          recommendations: ["Try meal prepping to cut costs."],
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Food dominates your spending.");
+    expect(screen.getByText("AI Summary")).toBeInTheDocument();
+  });
+
+  it("does not show AI summary card when summary API returns an error", async () => {
+    // Default handler already returns 502 — no override needed.
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    expect(screen.queryByText("AI Summary")).not.toBeInTheDocument();
+  });
 });

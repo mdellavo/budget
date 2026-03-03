@@ -36,6 +36,11 @@ export default function HelpPage() {
             </a>
           </li>
           <li>
+            <a href="#yearly" className="hover:underline">
+              Yearly Reports
+            </a>
+          </li>
+          <li>
             <a href="#recurring" className="hover:underline">
               Recurring Charges
             </a>
@@ -81,7 +86,8 @@ export default function HelpPage() {
             <ul className="list-disc list-inside space-y-1">
               <li>
                 <strong>All time / Month to date / Year to date</strong> — one-click presets that
-                instantly scope all stats, charts, and tables to the chosen window.
+                instantly scope all stats, charts, and tables to the chosen window. Year to date is
+                selected by default on first visit.
               </li>
               <li>
                 <strong>From / To dropdowns</strong> — pick any start and end month for a custom
@@ -89,7 +95,7 @@ export default function HelpPage() {
               </li>
               <li>
                 The selected filter is stored in the URL, so the browser back button restores it
-                after navigating away.
+                after navigating away. Clearing the URL params resets to Year to date.
               </li>
             </ul>
             <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Stat cards</h3>
@@ -189,6 +195,14 @@ export default function HelpPage() {
                 are skipped automatically.
               </li>
             </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations based on the current
+                month's budget performance. The result is cached; click <strong>Regenerate</strong>{" "}
+                to get a fresh analysis.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -274,6 +288,14 @@ export default function HelpPage() {
                 transactions.
               </li>
             </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations for the selected
+                date range. The result is cached; click <strong>Regenerate</strong> to get a fresh
+                analysis.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -297,8 +319,52 @@ export default function HelpPage() {
                 zoom in; click the centre to zoom back out.
               </li>
               <li>
-                <strong>Category table</strong> — nested category and subcategory rows with totals.
-                Click any name to open Transactions filtered to that category and month.
+                <strong>Category table</strong> — nested category and subcategory rows with totals
+                and month-over-month percentage changes. Click any name to open Transactions
+                filtered to that category and month.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations for the selected
+                month. The result is cached per month; click <strong>Regenerate</strong> to get a
+                fresh analysis.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Yearly */}
+        <section id="yearly">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Yearly Reports</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>Detailed breakdown of income and spending for a full calendar year.</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Year selector</strong> — pick any year from the sidebar; the report updates
+                instantly.
+              </li>
+              <li>
+                <strong>Stat cards</strong> — income, expenses, net, and savings rate for the
+                selected year, with year-over-year percentage changes.
+              </li>
+              <li>
+                <strong>Sunburst chart</strong> — same hierarchical visualization as Monthly, scoped
+                to the full year. Click a segment to zoom in; click the centre to zoom back out.
+              </li>
+              <li>
+                <strong>Category table</strong> — nested category and subcategory rows with totals
+                and year-over-year percentage changes. Click any name to open Transactions filtered
+                to that category and year.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations for the selected
+                year. The result is cached per year; click <strong>Regenerate</strong> to get a
+                fresh analysis.
               </li>
             </ul>
           </div>
@@ -312,6 +378,14 @@ export default function HelpPage() {
               Claude automatically detects recurring charges (subscriptions, bills, etc.) during
               enrichment based on transaction history.
             </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Date filter</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Use the <strong>From / To</strong> date pickers to narrow the list to a specific
+                window (defaults to the last 6 months). Click <strong>Apply</strong> to update the
+                view. The selected range is stored in the URL.
+              </li>
+            </ul>
             <ul className="list-disc list-inside space-y-1">
               <li>
                 <strong>Summary cards</strong> — total monthly cost, quarterly cost, annual cost,
@@ -336,6 +410,14 @@ export default function HelpPage() {
               </li>
               <li>Click a merchant name to view all of its transactions.</li>
             </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations for the selected
+                date range. The result is cached; click <strong>Regenerate</strong> to get a fresh
+                analysis.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -355,6 +437,14 @@ export default function HelpPage() {
               </li>
               <li>
                 Useful for spotting categories where spending is growing or shrinking over time.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">AI Summary</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Claude generates a narrative, key insights, and recommendations for the selected
+                date range. The result is cached; click <strong>Regenerate</strong> to get a fresh
+                analysis.
               </li>
             </ul>
           </div>

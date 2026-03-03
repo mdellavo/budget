@@ -66,6 +66,14 @@ export default function OverviewPage() {
     return null;
   })();
 
+  // Default to YTD on first load if no range is set.
+  useEffect(() => {
+    if (!searchParams.get("from") && !searchParams.get("to")) {
+      const year = new Date().getFullYear();
+      setSearchParams({ from: `${year}-01`, to: nowYYYYMM() }, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     listMonths()
       .then((res) => setMonths(res.months))

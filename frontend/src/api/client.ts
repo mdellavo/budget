@@ -264,9 +264,18 @@ export async function getOverview(filters: OverviewFilters = {}): Promise<Overvi
   );
 }
 
-export async function getRecurring(): Promise<RecurringData> {
+export interface RecurringFilters {
+  date_from?: string;
+  date_to?: string;
+}
+
+export async function getRecurring(filters: RecurringFilters = {}): Promise<RecurringData> {
+  const params = new URLSearchParams();
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  const qs = params.toString();
   return handleResponse<RecurringData>(
-    await fetch(`${BASE}/recurring`, { headers: authHeaders() })
+    await fetch(`${BASE}/recurring${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
   );
 }
 
@@ -322,6 +331,55 @@ export async function getOverviewSummary(
   const q = qs.toString();
   return handleResponse<ReportSummary>(
     await fetch(`${BASE}/overview/summary${q ? `?${q}` : ""}`, { headers: authHeaders() })
+  );
+}
+
+export async function getBudgetSummary(month: string, force = false): Promise<ReportSummary> {
+  const url = force
+    ? `${BASE}/budgets/${month}/summary?force=true`
+    : `${BASE}/budgets/${month}/summary`;
+  return handleResponse<ReportSummary>(await fetch(url, { headers: authHeaders() }));
+}
+
+export async function getCategoriesSummary(
+  params: { date_from?: string; date_to?: string } = {},
+  force = false
+): Promise<ReportSummary> {
+  const qs = new URLSearchParams();
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  if (force) qs.set("force", "true");
+  const q = qs.toString();
+  return handleResponse<ReportSummary>(
+    await fetch(`${BASE}/categories/summary${q ? `?${q}` : ""}`, { headers: authHeaders() })
+  );
+}
+
+export async function getRecurringSummary(
+  filters: RecurringFilters = {},
+  force = false
+): Promise<ReportSummary> {
+  const qs = new URLSearchParams();
+  if (filters.date_from) qs.set("date_from", filters.date_from);
+  if (filters.date_to) qs.set("date_to", filters.date_to);
+  if (force) qs.set("force", "true");
+  const q = qs.toString();
+  return handleResponse<ReportSummary>(
+    await fetch(`${BASE}/recurring/summary${q ? `?${q}` : ""}`, { headers: authHeaders() })
+  );
+}
+
+export async function getTrendSummary(
+  params: { date_from?: string; date_to?: string } = {},
+  force = false
+): Promise<ReportSummary> {
+  const qs = new URLSearchParams();
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  if (force) qs.set("force", "true");
+  const q = qs.toString();
+  return handleResponse<ReportSummary>(
+    await fetch(`${BASE}/category-trends/summary${q ? `?${q}` : ""}`, { headers: authHeaders() })
   );
 }
 

@@ -28,6 +28,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from pydantic import BaseModel
 from sqlalchemy import select, text
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,12 +39,22 @@ from .ai import (
     enricher,
     merchant_duplicate_finder,
     query_parser,
+    report_summarizer,
 )
 from .auth import create_access_token, get_current_user, verify_password
 from .database import AsyncSessionLocal, Base, engine, get_db
-from .models import Category, Merchant, Subcategory, Transaction, User
+from .models import (
+    Category,
+    Merchant,
+    Subcategory,
+    Tag,
+    Transaction,
+    User,
+    transaction_tags,
+)
 from .query import (
     AccountQueries,
+    AiSummaryCacheQueries,
     AnalyticsQueries,
     BudgetQueries,
     CardHolderQueries,
@@ -265,26 +276,57 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+        for col_sql in [
+            "ALTER TABLE transactions ADD COLUMN is_refund BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE transactions ADD COLUMN is_international BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE transactions ADD COLUMN payment_channel TEXT",
+        ]:
+            try:
+                await conn.execute(text(col_sql))
+            except Exception:
+                pass
+
     yield
 
 
-def _build_category_breakdown(rows: list) -> list[dict]:
+def _build_category_breakdown(rows: list, prev_rows: list | None = None) -> list[dict]:
     """Build a category→subcategory tree from flat (category, subcategory, total) rows."""
     cat_totals: dict[str, Decimal] = defaultdict(Decimal)
-    cat_subs: dict[str, list] = defaultdict(list)
+    sub_totals: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(Decimal)
+    )
     for r in rows:
         cat_totals[r.category] += r.total
-        cat_subs[r.category].append(
-            {"subcategory": r.subcategory, "total": str(r.total)}
+        sub_totals[r.category][r.subcategory] += r.total
+
+    prev_cat: dict[str, Decimal] = defaultdict(Decimal)
+    prev_sub: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    for r in prev_rows or []:
+        prev_cat[r.category] += r.total
+        prev_sub[r.category][r.subcategory] += r.total
+
+    result = []
+    for cat in sorted(cat_totals, key=lambda c: cat_totals[c]):
+        subs = sorted(
+            [
+                {
+                    "subcategory": sub,
+                    "total": str(total),
+                    "pct_change": _expenses_pct_change(total, prev_sub[cat][sub]),
+                }
+                for sub, total in sub_totals[cat].items()
+            ],
+            key=lambda x: Decimal(str(x["total"])),
         )
-    return [
-        {
-            "category": cat,
-            "total": str(cat_totals[cat]),
-            "subcategories": sorted(cat_subs[cat], key=lambda x: Decimal(x["total"])),
-        }
-        for cat in sorted(cat_totals, key=lambda c: cat_totals[c])
-    ]
+        result.append(
+            {
+                "category": cat,
+                "total": str(cat_totals[cat]),
+                "pct_change": _expenses_pct_change(cat_totals[cat], prev_cat[cat]),
+                "subcategories": subs,
+            }
+        )
+    return result
 
 
 app = FastAPI(lifespan=lifespan)
@@ -320,6 +362,103 @@ class BudgetBatchItem(BaseModel):
 
 class BudgetBatch(BaseModel):
     items: list[BudgetBatchItem]
+
+
+def _prev_month(month: str) -> str:
+    year, mon = int(month[:4]), int(month[5:7])
+    if mon == 1:
+        return f"{year - 1}-12"
+    return f"{year}-{(mon - 1):02d}"
+
+
+def _prev_year(year: str) -> str:
+    return str(int(year) - 1)
+
+
+def _month_date_range(month: str) -> tuple[str, str]:
+    """'2026-02' → ('2026-02-01', '2026-02-28')"""
+    year, m = map(int, month.split("-"))
+    last = monthrange(year, m)[1]
+    return f"{month}-01", f"{month}-{last:02d}"
+
+
+def _pct_change(new: Decimal, old: Decimal) -> float | None:
+    """Return (new-old)/|old|*100, or None when old is zero."""
+    if old == 0:
+        return None
+    return round(float((new - old) / abs(old) * 100), 1)
+
+
+def _expenses_pct_change(new_exp: Decimal, old_exp: Decimal) -> float | None:
+    """Compare absolute spending. Positive = spent more (worse)."""
+    if old_exp == 0:
+        return None
+    return round(float((abs(new_exp) - abs(old_exp)) / abs(old_exp) * 100), 1)
+
+
+def _format_month_label(month: str) -> str:
+    """'2026-02' → 'February 2026'"""
+    return datetime.strptime(month, "%Y-%m").strftime("%B %Y")
+
+
+def _build_monthly_report(
+    month: str,
+    stats: dict,
+    prev_stats: dict,
+    rows: list,
+    prev_rows: list,
+) -> dict:
+    income = stats["income"]
+    expenses = stats["expenses"]
+    net = income + expenses
+    prev_income = prev_stats["income"]
+    prev_expenses = prev_stats["expenses"]
+    prev_net = prev_income + prev_expenses
+    savings_rate = float(net / income * 100) if income > 0 else None
+    return {
+        "month": month,
+        "summary": {
+            "transaction_count": stats["transaction_count"],
+            "income": str(income),
+            "expenses": str(expenses),
+            "net": str(net),
+            "savings_rate": savings_rate,
+            "income_pct_change": _pct_change(income, prev_income),
+            "expenses_pct_change": _expenses_pct_change(expenses, prev_expenses),
+            "net_pct_change": _pct_change(net, prev_net),
+        },
+        "category_breakdown": _build_category_breakdown(rows, prev_rows),
+    }
+
+
+def _build_yearly_report(
+    year: str,
+    stats: dict,
+    prev_stats: dict,
+    rows: list,
+    prev_rows: list,
+) -> dict:
+    income = stats["income"]
+    expenses = stats["expenses"]
+    net = income + expenses
+    prev_income = prev_stats["income"]
+    prev_expenses = prev_stats["expenses"]
+    prev_net = prev_income + prev_expenses
+    savings_rate = float(net / income * 100) if income > 0 else None
+    return {
+        "year": year,
+        "summary": {
+            "transaction_count": stats["transaction_count"],
+            "income": str(income),
+            "expenses": str(expenses),
+            "net": str(net),
+            "savings_rate": savings_rate,
+            "income_pct_change": _pct_change(income, prev_income),
+            "expenses_pct_change": _expenses_pct_change(expenses, prev_expenses),
+            "net_pct_change": _pct_change(net, prev_net),
+        },
+        "category_breakdown": _build_category_breakdown(rows, prev_rows),
+    }
 
 
 def _compute_forecast(spent: Decimal, month: str) -> Decimal | None:
@@ -579,21 +718,45 @@ async def _run_enrichment(
                 raw_description = row[desc_col].strip() if desc_col else None
                 description = r.get("description") or raw_description or ""
                 is_recurring = bool(r.get("is_recurring", False))
-                db.add(
-                    Transaction(
-                        account_id=account_id,
-                        csv_import_id=csv_import_id,
-                        date=date_val,
-                        description=description,
-                        raw_description=raw_description,
-                        amount=amount_val,
-                        merchant_id=merchant_id,
-                        subcategory_id=subcategory_id,
-                        cardholder_id=cardholder_id,
-                        is_recurring=is_recurring,
-                        user_id=user_id,
-                    )
+                is_refund = bool(r.get("is_refund", False))
+                is_international = bool(r.get("is_international", False))
+                payment_channel = r.get("payment_channel")
+                tag_names = [
+                    t.strip().lower()
+                    for t in (r.get("suggested_tags") or [])
+                    if t.strip()
+                ]
+                tx = Transaction(
+                    account_id=account_id,
+                    csv_import_id=csv_import_id,
+                    date=date_val,
+                    description=description,
+                    raw_description=raw_description,
+                    amount=amount_val,
+                    merchant_id=merchant_id,
+                    subcategory_id=subcategory_id,
+                    cardholder_id=cardholder_id,
+                    is_recurring=is_recurring,
+                    is_refund=is_refund,
+                    is_international=is_international,
+                    payment_channel=payment_channel,
+                    user_id=user_id,
                 )
+                db.add(tx)
+                await db.flush()
+                for tag_name in tag_names:
+                    tag = await db.scalar(
+                        select(Tag).where(Tag.user_id == user_id, Tag.name == tag_name)
+                    )
+                    if not tag:
+                        tag = Tag(user_id=user_id, name=tag_name)
+                        db.add(tag)
+                        await db.flush()
+                    await db.execute(
+                        sqlite_insert(transaction_tags)
+                        .values(transaction_id=tx.id, tag_id=tag.id)
+                        .on_conflict_do_nothing()
+                    )
 
             await db.commit()
 
@@ -617,6 +780,11 @@ async def _run_enrichment(
         csq = CsvImportQueries(db)
         await csq.mark_complete(csv_import_id)
         await db.commit()
+
+    if user_id is not None:
+        async with AsyncSessionLocal() as db:
+            await AiSummaryCacheQueries(db, user_id=user_id).invalidate_all()
+            await db.commit()
 
     logger.info("Background enrichment complete for csv_import_id=%d", csv_import_id)
 
@@ -646,12 +814,14 @@ def _classify_gap(median_days: float) -> str | None:
 
 @app.get("/recurring")
 async def get_recurring(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     rows = await AnalyticsQueries(
         db, user_id=current_user.id
-    ).get_recurring_transactions()
+    ).get_recurring_transactions(date_from=date_from, date_to=date_to)
 
     groups: dict[object, list] = defaultdict(list)
     for r in rows:
@@ -699,6 +869,97 @@ async def get_recurring(
     return {"items": results}
 
 
+@app.get("/recurring/summary")
+async def get_recurring_summary(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    period_key = f"{date_from or 'all'}:{date_to or 'all'}"
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("recurring", period_key)
+        if cached is not None:
+            return cached
+
+    rows = await AnalyticsQueries(
+        db, user_id=current_user.id
+    ).get_recurring_transactions(date_from=date_from, date_to=date_to)
+
+    groups: dict[object, list] = defaultdict(list)
+    for r in rows:
+        key = (
+            r.merchant_id
+            if r.merchant_id is not None
+            else f"desc:{r.description.strip().lower()}"
+        )
+        groups[key].append(r)
+
+    items = []
+    for txns in groups.values():
+        if len(txns) < 2:
+            continue
+        dates = sorted(t.date for t in txns)
+        gaps = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+        median_gap = _median(gaps)
+        frequency = _classify_gap(median_gap)
+        if frequency is None:
+            continue
+        amounts = [abs(t.amount) for t in txns]
+        median_amount = _median(amounts)
+        monthly_cost = median_amount * MONTHLY_FACTORS[frequency]
+        rep = txns[0]
+        if rep.category_name != "Income":
+            items.append(
+                {
+                    "merchant": rep.merchant_name or rep.description,
+                    "category": rep.category_name,
+                    "amount": str(median_amount.quantize(Decimal("0.01"))),
+                    "frequency": frequency,
+                    "monthly_cost": float(monthly_cost.quantize(Decimal("0.01"))),
+                }
+            )
+
+    items.sort(key=lambda x: x["monthly_cost"], reverse=True)
+    total_monthly = sum(x["monthly_cost"] for x in items)
+
+    cat_totals: dict[str, float] = {}
+    for item in items:
+        cat = item["category"] or "Uncategorized"
+        cat_totals[cat] = cat_totals.get(cat, 0.0) + item["monthly_cost"]
+
+    report = {
+        "total_monthly_cost": round(total_monthly, 2),
+        "total_annual_cost": round(total_monthly * 12, 2),
+        "subscription_count": len(items),
+        "top_subscriptions": [
+            {
+                "merchant": x["merchant"],
+                "monthly_cost": x["monthly_cost"],
+                "frequency": x["frequency"],
+            }
+            for x in items[:10]
+        ],
+        "by_category": [
+            {"category": cat, "monthly_cost": round(amt, 2)}
+            for cat, amt in sorted(cat_totals.items(), key=lambda t: t[1], reverse=True)
+        ],
+    }
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize, "Recurring Charges", report
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("recurring", period_key, result)
+    await db.commit()
+    return result
+
+
 @app.get("/monthly")
 async def list_months(
     db: AsyncSession = Depends(get_db),
@@ -715,26 +976,76 @@ async def get_monthly_report(
     current_user: User = Depends(get_current_user),
 ):
     aq = AnalyticsQueries(db, user_id=current_user.id)
-    stats = await aq.get_month_stats(month)
-    transaction_count = stats["transaction_count"]
-    income = stats["income"]
-    expenses = stats["expenses"]
-    net = income + expenses  # expenses is negative
-    savings_rate = float(net / income * 100) if income > 0 else None
+    stats, prev_stats, rows, prev_rows = await asyncio.gather(
+        aq.get_month_stats(month),
+        aq.get_month_stats(_prev_month(month)),
+        aq.get_category_breakdown(month),
+        aq.get_category_breakdown(_prev_month(month)),
+    )
+    return _build_monthly_report(month, stats, prev_stats, rows, prev_rows)
 
-    rows = await aq.get_category_breakdown(month)
 
-    return {
-        "month": month,
-        "summary": {
-            "transaction_count": transaction_count,
-            "income": str(income),
-            "expenses": str(expenses),
-            "net": str(net),
-            "savings_rate": savings_rate,
-        },
-        "category_breakdown": _build_category_breakdown(rows),
-    }
+@app.get("/monthly/{month}/summary")
+async def get_monthly_summary(
+    month: str,
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("monthly", month)
+        if cached is not None:
+            return cached
+
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    date_from, date_to = _month_date_range(month)
+
+    stats, prev_stats, rows, prev_rows = await asyncio.gather(
+        aq.get_month_stats(month),
+        aq.get_month_stats(_prev_month(month)),
+        aq.get_category_breakdown(month),
+        aq.get_category_breakdown(_prev_month(month)),
+    )
+    expense_merchants, income_sources, budgets = await asyncio.gather(
+        aq.get_expenses_by_merchant(date_from, date_to),
+        aq.get_income_by_merchant(date_from, date_to),
+        BudgetQueries(db, user_id=current_user.id).list_with_spending(month),
+    )
+
+    report = _build_monthly_report(month, stats, prev_stats, rows, prev_rows)
+
+    report["top_expense_merchants"] = [
+        {"merchant": r.name, "amount": str(r.total)} for r in expense_merchants[:8]
+    ]
+    report["income_sources"] = [
+        {"source": r.name, "amount": str(r.total)} for r in income_sources[:5]
+    ]
+    if budgets:
+        report["budget_performance"] = [
+            {
+                "name": b.subcategory_name or b.category_name,
+                "limit": str(b.amount_limit),
+                "spent": str(b.spent),
+                "pct_used": (
+                    round(float(abs(b.spent) / b.amount_limit * 100), 1)
+                    if b.amount_limit
+                    else None
+                ),
+            }
+            for b in budgets
+        ]
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize, _format_month_label(month), report
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("monthly", month, result)
+    await db.commit()
+    return result
 
 
 @app.get("/yearly")
@@ -753,26 +1064,150 @@ async def get_yearly_report(
     current_user: User = Depends(get_current_user),
 ):
     aq = AnalyticsQueries(db, user_id=current_user.id)
-    stats, rows = await asyncio.gather(
+    stats, prev_stats, rows, prev_rows = await asyncio.gather(
         aq.get_year_stats(year),
+        aq.get_year_stats(_prev_year(year)),
         aq.get_year_category_breakdown(year),
+        aq.get_year_category_breakdown(_prev_year(year)),
     )
-    income = stats["income"]
-    expenses = stats["expenses"]
-    net = income + expenses
+    return _build_yearly_report(year, stats, prev_stats, rows, prev_rows)
+
+
+@app.get("/yearly/{year}/summary")
+async def get_yearly_summary(
+    year: str,
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("yearly", year)
+        if cached is not None:
+            return cached
+
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    date_from, date_to = f"{year}-01-01", f"{year}-12-31"
+    month_keys = [f"{year}-{m:02d}" for m in range(1, 13)]
+
+    stats, prev_stats, rows, prev_rows = await asyncio.gather(
+        aq.get_year_stats(year),
+        aq.get_year_stats(_prev_year(year)),
+        aq.get_year_category_breakdown(year),
+        aq.get_year_category_breakdown(_prev_year(year)),
+    )
+    expense_merchants, income_sources = await asyncio.gather(
+        aq.get_expenses_by_merchant(date_from, date_to),
+        aq.get_income_by_merchant(date_from, date_to),
+    )
+    monthly_stats = list(
+        await asyncio.gather(*[aq.get_month_stats(m) for m in month_keys])
+    )
+
+    report = _build_yearly_report(year, stats, prev_stats, rows, prev_rows)
+
+    report["top_expense_merchants"] = [
+        {"merchant": r.name, "amount": str(r.total)} for r in expense_merchants[:8]
+    ]
+    report["income_sources"] = [
+        {"source": r.name, "amount": str(r.total)} for r in income_sources[:5]
+    ]
+    report["monthly_trend"] = [
+        {
+            "month": month_keys[i],
+            "income": str(ms["income"]),
+            "expenses": str(ms["expenses"]),
+            "net": str(ms["income"] + ms["expenses"]),
+        }
+        for i, ms in enumerate(monthly_stats)
+        if ms["transaction_count"] > 0
+    ]
+
+    try:
+        result = await asyncio.to_thread(report_summarizer.summarize, year, report)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("yearly", year, result)
+    await db.commit()
+    return result
+
+
+def _overview_period_key(date_from: str | None, date_to: str | None) -> str:
+    if date_from and date_to:
+        return f"{date_from}:{date_to}"
+    if date_from:
+        return f"from:{date_from}"
+    if date_to:
+        return f"to:{date_to}"
+    return "all"
+
+
+@app.get("/overview/summary")
+async def get_overview_summary(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    period_key = _overview_period_key(date_from, date_to)
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+
+    if not force:
+        cached = await cache.get("overview", period_key)
+        if cached is not None:
+            return cached
+
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    summary = await aq.get_overview_summary(date_from, date_to)
+    income_rows, expense_rows, income_cat_rows = await asyncio.gather(
+        aq.get_income_by_merchant(date_from, date_to),
+        aq.get_expenses_by_category(date_from, date_to),
+        aq.get_income_by_category(date_from, date_to),
+    )
+
+    income = summary["income"]
+    expenses = summary["expenses"]
+    net = summary["net"]
     savings_rate = float(net / income * 100) if income > 0 else None
 
-    return {
-        "year": year,
-        "summary": {
-            "transaction_count": stats["transaction_count"],
-            "income": str(income),
-            "expenses": str(expenses),
-            "net": str(net),
-            "savings_rate": savings_rate,
-        },
-        "category_breakdown": _build_category_breakdown(rows),
+    report = {
+        "transaction_count": summary["transaction_count"],
+        "income": str(income),
+        "expenses": str(expenses),
+        "net": str(net),
+        "savings_rate": round(savings_rate, 1) if savings_rate is not None else None,
+        "top_expense_categories": [
+            {"category": r.name, "amount": str(r.total)} for r in expense_rows[:10]
+        ],
+        "top_income_sources": [
+            {"source": r.name, "amount": str(r.total)} for r in income_rows[:8]
+        ],
+        "income_by_category": [
+            {"category": r.name, "amount": str(r.total)} for r in income_cat_rows[:8]
+        ],
     }
+
+    if date_from and date_to:
+        period_label = f"{date_from} to {date_to}"
+    elif date_from:
+        period_label = f"from {date_from} onward"
+    elif date_to:
+        period_label = f"through {date_to}"
+    else:
+        period_label = "All Time"
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize, period_label, report
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("overview", period_key, result)
+    await db.commit()
+    return result
 
 
 @app.get("/overview")
@@ -875,6 +1310,81 @@ async def get_category_trends(
     }
 
 
+@app.get("/category-trends/summary")
+async def get_trends_summary(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    period_key = _overview_period_key(date_from, date_to)
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("trends", period_key)
+        if cached is not None:
+            return cached
+
+    rows = await AnalyticsQueries(db, user_id=current_user.id).get_category_trends(
+        date_from, date_to
+    )
+
+    # Aggregate totals per category
+    cat_totals: dict[str, float] = {}
+    monthly_data: dict[str, dict[str, float]] = {}
+    for r in rows:
+        cat = r.category
+        amt = abs(float(r.total))
+        cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
+        if cat not in monthly_data:
+            monthly_data[cat] = {}
+        monthly_data[cat][r.month] = amt
+
+    sorted_cats = sorted(cat_totals.items(), key=lambda t: t[1], reverse=True)
+    months = sorted(set(r.month for r in rows))
+
+    if date_from and date_to:
+        period_label = f"{date_from} to {date_to}"
+    elif date_from:
+        period_label = f"from {date_from} onward"
+    elif date_to:
+        period_label = f"through {date_to}"
+    else:
+        period_label = "All Time"
+
+    report = {
+        "period": period_label,
+        "months_covered": len(months),
+        "top_categories": [
+            {"category": cat, "total_spent": round(amt, 2)}
+            for cat, amt in sorted_cats[:15]
+        ],
+        "monthly_breakdown": [
+            {
+                "month": m,
+                "totals": {
+                    cat: round(monthly_data[cat].get(m, 0.0), 2)
+                    for cat, _ in sorted_cats[:10]
+                },
+            }
+            for m in months[-12:]
+        ],
+    }
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize,
+            f"Spending Trends — {period_label}",
+            report,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("trends", period_key, result)
+    await db.commit()
+    return result
+
+
 @app.get("/merchants")
 async def list_merchants(
     name: str | None = Query(
@@ -961,6 +1471,8 @@ async def update_merchant(
         raise HTTPException(status_code=404, detail="Merchant not found")
     await mq.update(merchant, body.name, body.location, body.website)
     await db.commit()
+    await AiSummaryCacheQueries(db, user_id=current_user.id).invalidate_all()
+    await db.commit()
     await db.refresh(merchant)
     transaction_count, total_amount = await mq.get_stats(merchant_id)
     return _merchant_row(merchant, transaction_count, total_amount)
@@ -1004,6 +1516,85 @@ async def list_categories(
             for r in rows
         ]
     }
+
+
+@app.get("/categories/summary")
+async def get_categories_summary(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    period_key = _overview_period_key(date_from, date_to)
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("categories", period_key)
+        if cached is not None:
+            return cached
+
+    rows = await CategoryQueries(db, user_id=current_user.id).list_with_stats(
+        date_from=date_from,
+        date_to=date_to,
+        category=None,
+        subcategory=None,
+        sort_by="total_amount",
+        sort_dir="asc",
+    )
+
+    cat_map: dict[str, dict] = {}
+    for row in rows:
+        cat = row.category
+        if cat not in cat_map:
+            cat_map[cat] = {
+                "category": cat,
+                "classification": row.classification,
+                "total_amount": Decimal(0),
+                "transaction_count": 0,
+                "subcategories": [],
+            }
+        cat_map[cat]["total_amount"] += Decimal(str(row.total_amount))
+        cat_map[cat]["transaction_count"] += row.transaction_count
+        cat_map[cat]["subcategories"].append(
+            {
+                "name": row.subcategory,
+                "total_amount": str(row.total_amount),
+                "transaction_count": row.transaction_count,
+            }
+        )
+
+    sorted_cats = sorted(
+        cat_map.values(), key=lambda c: abs(c["total_amount"]), reverse=True
+    )
+    for c in sorted_cats:
+        c["total_amount"] = str(c["total_amount"])
+
+    if date_from and date_to:
+        period_label = f"{date_from} to {date_to}"
+    elif date_from:
+        period_label = f"from {date_from} onward"
+    elif date_to:
+        period_label = f"through {date_to}"
+    else:
+        period_label = "All Time"
+
+    report = {
+        "period": period_label,
+        "categories": sorted_cats[:20],
+    }
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize,
+            f"Category Breakdown — {period_label}",
+            report,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("categories", period_key, result)
+    await db.commit()
+    return result
 
 
 @app.get("/accounts")
@@ -1426,6 +2017,16 @@ async def list_transactions(
     is_recurring: bool | None = Query(
         None, description="Filter by recurring flag (true/false)"
     ),
+    is_refund: bool | None = Query(
+        None, description="Filter by refund flag (true/false)"
+    ),
+    is_international: bool | None = Query(
+        None, description="Filter by international flag (true/false)"
+    ),
+    payment_channel: str | None = Query(
+        None,
+        description="Filter by payment channel (purchase/refund/fee/interest/p2p/atm/transfer/payroll)",
+    ),
     uncategorized: bool | None = Query(
         None, description="true = only transactions with no category/subcategory"
     ),
@@ -1461,6 +2062,9 @@ async def list_transactions(
         account=account,
         import_id=import_id,
         is_recurring=is_recurring,
+        is_refund=is_refund,
+        is_international=is_international,
+        payment_channel=payment_channel,
         uncategorized=uncategorized,
         cardholder=cardholder,
         tag=tag,
@@ -1491,6 +2095,9 @@ async def list_transactions(
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
+                "is_refund": tx.is_refund,
+                "is_international": tx.is_international,
+                "payment_channel": tx.payment_channel,
                 "raw_description": tx.raw_description,
                 "cardholder_name": tx.cardholder.name if tx.cardholder else None,
                 "card_number": tx.cardholder.card_number if tx.cardholder else None,
@@ -1568,7 +2175,14 @@ async def update_transaction(
     # Tags
     await txq.set_transaction_tags(tx, body.tags)
 
+    month_key = tx.date.strftime("%Y-%m")
+    year_key = str(tx.date.year)
     await db.commit()
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    await cache.invalidate_period("monthly", month_key)
+    await cache.invalidate_period("yearly", year_key)
+    await db.commit()
+
     db.expire(tx)
     tx = await txq.get_by_id(transaction_id)
     if tx is None:
@@ -1587,6 +2201,9 @@ async def update_transaction(
         "subcategory": tx.subcategory.name if tx.subcategory else None,
         "notes": tx.notes,
         "is_recurring": tx.is_recurring,
+        "is_refund": tx.is_refund,
+        "is_international": tx.is_international,
+        "payment_channel": tx.payment_channel,
         "raw_description": tx.raw_description,
         "cardholder_name": tx.cardholder.name if tx.cardholder else None,
         "card_number": tx.cardholder.card_number if tx.cardholder else None,
@@ -1671,7 +2288,33 @@ async def re_enrich_transactions(
         if r.get("description"):
             tx.description = r["description"]
         tx.is_recurring = bool(r.get("is_recurring", False))
+        tx.is_refund = bool(r.get("is_refund", False))
+        tx.is_international = bool(r.get("is_international", False))
+        tx.payment_channel = r.get("payment_channel")
 
+        tag_names = [
+            t.strip().lower() for t in (r.get("suggested_tags") or []) if t.strip()
+        ]
+        if tag_names:
+            await db.flush()
+            for tag_name in tag_names:
+                tag = await db.scalar(
+                    select(Tag).where(
+                        Tag.user_id == current_user.id, Tag.name == tag_name
+                    )
+                )
+                if not tag:
+                    tag = Tag(user_id=current_user.id, name=tag_name)
+                    db.add(tag)
+                    await db.flush()
+                await db.execute(
+                    sqlite_insert(transaction_tags)
+                    .values(transaction_id=tx.id, tag_id=tag.id)
+                    .on_conflict_do_nothing()
+                )
+
+    await db.commit()
+    await AiSummaryCacheQueries(db, user_id=current_user.id).invalidate_all()
     await db.commit()
 
     updated = await txq.get_by_ids([tx.id for tx in eligible])
@@ -1691,9 +2334,13 @@ async def re_enrich_transactions(
                 "subcategory": tx.subcategory.name if tx.subcategory else None,
                 "notes": tx.notes,
                 "is_recurring": tx.is_recurring,
+                "is_refund": tx.is_refund,
+                "is_international": tx.is_international,
+                "payment_channel": tx.payment_channel,
                 "raw_description": tx.raw_description,
                 "cardholder_name": tx.cardholder.name if tx.cardholder else None,
                 "card_number": tx.cardholder.card_number if tx.cardholder else None,
+                "tags": [t.name for t in tx.tags],
             }
             for tx in updated
         ]
@@ -1804,6 +2451,8 @@ async def merge_merchants(
     loser_ids = [m.id for m in rows if m.id != winner.id]
 
     await mq.merge(winner, loser_ids, body.canonical_name, body.canonical_location)
+    await db.commit()
+    await AiSummaryCacheQueries(db, user_id=current_user.id).invalidate_all()
     await db.commit()
     await db.refresh(winner)
 
@@ -1973,6 +2622,8 @@ async def update_category(
     if not updated:
         raise HTTPException(status_code=404, detail="Category not found")
     await db.commit()
+    await AiSummaryCacheQueries(db, user_id=current_user.id).invalidate_all()
+    await db.commit()
     return {"id": category_id, "classification": body.classification}
 
 
@@ -1993,6 +2644,8 @@ async def update_subcategory(
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Subcategory not found")
+    await db.commit()
+    await AiSummaryCacheQueries(db, user_id=current_user.id).invalidate_all()
     await db.commit()
     return {"id": subcategory_id, "classification": body.classification}
 
@@ -2144,6 +2797,63 @@ async def budget_wizard(
         "avg_monthly_income": str(avg_income.quantize(Decimal("0.01"))),
         "months_analyzed": len(look_back),
     }
+
+
+@app.get("/budgets/{month}/summary")
+async def get_budget_summary(
+    month: str,
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cache = AiSummaryCacheQueries(db, user_id=current_user.id)
+    if not force:
+        cached = await cache.get("budget", month)
+        if cached is not None:
+            return cached
+
+    bq = BudgetQueries(db, user_id=current_user.id)
+    aq = AnalyticsQueries(db, user_id=current_user.id)
+    rows, stats = await asyncio.gather(
+        bq.list_with_spending(month),
+        aq.get_month_stats(month),
+    )
+
+    budget_items = []
+    for row in rows:
+        spent = Decimal(row.spent or 0)
+        forecast = _compute_forecast(spent, month)
+        d = _budget_row_to_dict(row, spent, forecast)
+        budget_items.append(
+            {
+                "name": d["name"],
+                "limit": d["amount_limit"],
+                "spent": d["spent"],
+                "pct_used": d["pct"],
+                "severity": d["severity"],
+                "forecast": d["forecast"],
+            }
+        )
+
+    report = {
+        "month": month,
+        "income": str(stats["income"]),
+        "expenses": str(stats["expenses"]),
+        "budgets": budget_items,
+    }
+
+    try:
+        result = await asyncio.to_thread(
+            report_summarizer.summarize,
+            f"Budget — {_format_month_label(month)}",
+            report,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
+
+    await cache.set("budget", month, result)
+    await db.commit()
+    return result
 
 
 @app.post("/budgets/batch", status_code=201)

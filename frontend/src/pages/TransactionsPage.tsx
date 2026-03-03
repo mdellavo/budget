@@ -51,6 +51,9 @@ const EMPTY_FILTERS = {
   account: "",
   import_id: "",
   is_recurring: "",
+  is_refund: "",
+  is_international: "",
+  payment_channel: "",
   uncategorized: "",
   cardholder: "",
   tag: "",
@@ -71,6 +74,9 @@ function filtersFromParams(p: URLSearchParams): FormFilters {
     account: p.get("account") ?? "",
     import_id: p.get("import_id") ?? "",
     is_recurring: p.get("is_recurring") ?? "",
+    is_refund: p.get("is_refund") ?? "",
+    is_international: p.get("is_international") ?? "",
+    payment_channel: p.get("payment_channel") ?? "",
     uncategorized: p.get("uncategorized") ?? "",
     cardholder: p.get("cardholder") ?? "",
     tag: p.get("tag") ?? "",
@@ -90,6 +96,9 @@ function buildParams(f: FormFilters, sb: SortKey, sd: "asc" | "desc"): URLSearch
   if (f.account) p.set("account", f.account);
   if (f.import_id) p.set("import_id", f.import_id);
   if (f.is_recurring) p.set("is_recurring", f.is_recurring);
+  if (f.is_refund) p.set("is_refund", f.is_refund);
+  if (f.is_international) p.set("is_international", f.is_international);
+  if (f.payment_channel) p.set("payment_channel", f.payment_channel);
   if (f.uncategorized) p.set("uncategorized", f.uncategorized);
   if (f.cardholder) p.set("cardholder", f.cardholder);
   if (f.tag) p.set("tag", f.tag);
@@ -112,6 +121,11 @@ function toApiFilters(f: FormFilters): TransactionFilters {
   if (f.import_id) out.import_id = parseInt(f.import_id, 10);
   if (f.is_recurring === "true") out.is_recurring = true;
   else if (f.is_recurring === "false") out.is_recurring = false;
+  if (f.is_refund === "true") out.is_refund = true;
+  else if (f.is_refund === "false") out.is_refund = false;
+  if (f.is_international === "true") out.is_international = true;
+  else if (f.is_international === "false") out.is_international = false;
+  if (f.payment_channel) out.payment_channel = f.payment_channel;
   if (f.uncategorized === "true") out.uncategorized = true;
   if (f.cardholder) out.cardholder = f.cardholder;
   if (f.tag) out.tag = f.tag;
@@ -342,6 +356,25 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
           <div>
             <span className="font-medium">Account:</span> {tx.account}
           </div>
+          {(tx.payment_channel || tx.is_refund || tx.is_international) && (
+            <div className="flex gap-2 flex-wrap pt-0.5">
+              {tx.payment_channel && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 font-mono">
+                  {tx.payment_channel}
+                </span>
+              )}
+              {tx.is_refund && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">
+                  refund
+                </span>
+              )}
+              {tx.is_international && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700">
+                  international
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Form */}
@@ -620,6 +653,25 @@ function TransactionDetailModal({ tx, onClose, onEdit }: TransactionDetailModalP
               <span className="text-gray-400">No</span>
             )}
           </Row>
+          {tx.is_refund && (
+            <Row label="Refund">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">
+                Refund / Credit
+              </span>
+            </Row>
+          )}
+          {tx.is_international && (
+            <Row label="International">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700">
+                International
+              </span>
+            </Row>
+          )}
+          {tx.payment_channel && (
+            <Row label="Channel">
+              <span className="font-mono text-xs text-gray-600">{tx.payment_channel}</span>
+            </Row>
+          )}
           <Row label="ID">
             <span className="font-mono text-gray-400 text-xs">{tx.id}</span>
           </Row>
@@ -1393,6 +1445,48 @@ export default function TransactionsPage() {
               <option value="">All</option>
               <option value="true">Recurring only</option>
               <option value="false">Non-recurring only</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Refund</label>
+            <select
+              value={filters.is_refund}
+              onChange={(e) => setField("is_refund", e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All</option>
+              <option value="true">Refunds only</option>
+              <option value="false">Exclude refunds</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">International</label>
+            <select
+              value={filters.is_international}
+              onChange={(e) => setField("is_international", e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All</option>
+              <option value="true">International only</option>
+              <option value="false">Domestic only</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-medium">Channel</label>
+            <select
+              value={filters.payment_channel}
+              onChange={(e) => setField("payment_channel", e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All</option>
+              <option value="purchase">Purchase</option>
+              <option value="refund">Refund</option>
+              <option value="fee">Fee</option>
+              <option value="interest">Interest</option>
+              <option value="p2p">P2P</option>
+              <option value="atm">ATM</option>
+              <option value="transfer">Transfer</option>
+              <option value="payroll">Payroll</option>
             </select>
           </div>
           <div className="flex flex-col gap-1">

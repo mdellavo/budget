@@ -144,4 +144,26 @@ describe("TrendPage", () => {
     expect(names).toContain("Food & Drink");
     expect(names).toContain("Transport");
   });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/category-trends/summary", () =>
+        HttpResponse.json({
+          narrative: "Spending trends show Food dominates.",
+          insights: ["Food & Drink grew 10% month-over-month."],
+          recommendations: ["Set a budget for Food & Drink."],
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Spending trends show Food dominates.");
+    expect(screen.getByText("AI Summary")).toBeInTheDocument();
+  });
+
+  it("does not show AI summary card when summary API returns an error", async () => {
+    // Default handler already returns 502.
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    expect(screen.queryByText("AI Summary")).not.toBeInTheDocument();
+  });
 });

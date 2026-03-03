@@ -36,7 +36,7 @@ describe("Sidebar", () => {
       "Monthly",
     ];
     for (const label of expectedLabels) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
   });
 

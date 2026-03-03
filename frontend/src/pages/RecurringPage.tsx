@@ -1,12 +1,22 @@
-import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { getRecurring } from "../api/client";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { getRecurring, getRecurringSummary } from "../api/client";
 import HelpIcon from "../components/HelpIcon";
+import AiSummaryCard from "../components/AiSummaryCard";
 import MerchantLogo from "../components/MerchantLogo";
 import { parseAmount } from "../lib/format";
-import type { RecurringItem } from "../types";
+import type { RecurringItem, ReportSummary } from "../types";
 
 const TODAY = new Date().toISOString().slice(0, 10);
+
+function defaultDateRange(): { date_from: string; date_to: string } {
+  const today = new Date();
+  const date_to = today.toISOString().slice(0, 10);
+  const from = new Date(today);
+  from.setMonth(from.getMonth() - 6);
+  const date_from = from.toISOString().slice(0, 10);
+  return { date_from, date_to };
+}
 
 type SortKey = keyof RecurringItem;
 
@@ -53,18 +63,63 @@ function compareValues(a: RecurringItem, b: RecurringItem, key: SortKey): number
 }
 
 export default function RecurringPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const defaults = defaultDateRange();
+  const activeFrom = searchParams.get("date_from") ?? defaults.date_from;
+  const activeTo = searchParams.get("date_to") ?? defaults.date_to;
+
+  const [dateFrom, setDateFrom] = useState(activeFrom);
+  const [dateTo, setDateTo] = useState(activeTo);
   const [items, setItems] = useState<RecurringItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>("merchant");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [aiSummary, setAiSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
-    getRecurring()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDateFrom(activeFrom);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDateTo(activeTo);
+  }, [activeFrom, activeTo]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setError(null);
+    getRecurring({ date_from: activeFrom, date_to: activeTo })
       .then((data) => setItems(data.items.filter((item) => item.category !== "Income")))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeFrom, activeTo]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAiSummary(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSummaryLoading(true);
+    getRecurringSummary({ date_from: activeFrom, date_to: activeTo })
+      .then(setAiSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [activeFrom, activeTo]);
+
+  const handleRegenerateSummary = useCallback(() => {
+    setAiSummary(null);
+    setSummaryLoading(true);
+    getRecurringSummary({ date_from: activeFrom, date_to: activeTo }, true)
+      .then(setAiSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [activeFrom, activeTo]);
+
+  function handleApply(e: React.FormEvent) {
+    e.preventDefault();
+    setSearchParams({ date_from: dateFrom, date_to: dateTo });
+  }
 
   function handleSort(key: SortKey) {
     if (key === sortBy) {
@@ -126,9 +181,42 @@ export default function RecurringPage() {
         <h1 className="text-2xl font-bold text-gray-900">Recurring Charges</h1>
         <HelpIcon section="recurring" />
       </div>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-gray-500 mb-4">
         Subscriptions and bills detected automatically from your transaction history.
       </p>
+
+      <form onSubmit={handleApply} className="flex items-end gap-4 mb-6">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="date-from">
+            From
+          </label>
+          <input
+            id="date-from"
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="date-to">
+            To
+          </label>
+          <input
+            id="date-to"
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <button
+          type="submit"
+          className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          Apply
+        </button>
+      </form>
 
       {loading && <div className="text-gray-500">Loading…</div>}
 
@@ -154,6 +242,15 @@ export default function RecurringPage() {
         </div>
       )}
 
+      {(summaryLoading || aiSummary) && (
+        <AiSummaryCard
+          summary={aiSummary}
+          loading={summaryLoading}
+          onRegenerate={handleRegenerateSummary}
+          className="mb-6"
+        />
+      )}
+
       {categoryBreakdown && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
           <table className="min-w-full text-sm">
@@ -177,7 +274,14 @@ export default function RecurringPage() {
               {categoryBreakdown.map(({ category, monthly, count, subcategories }) => (
                 <>
                   <tr key={category} className="bg-gray-50">
-                    <td className="px-4 py-2 font-semibold text-gray-800">{category}</td>
+                    <td className="px-4 py-2 font-semibold text-gray-800">
+                      <Link
+                        to={`/transactions?category=${encodeURIComponent(category)}&is_recurring=true`}
+                        className="text-indigo-600 hover:underline"
+                      >
+                        {category}
+                      </Link>
+                    </td>
                     <td className="px-4 py-2 text-right font-semibold text-gray-800">
                       {formatAmount(monthly)}
                     </td>
@@ -188,7 +292,14 @@ export default function RecurringPage() {
                   </tr>
                   {subcategories.map(({ subcategory, monthly: subMonthly, count: subCount }) => (
                     <tr key={`${category}-${subcategory}`}>
-                      <td className="px-4 py-1.5 pl-8 text-gray-600">{subcategory}</td>
+                      <td className="px-4 py-1.5 pl-8 text-gray-600">
+                        <Link
+                          to={`/transactions?subcategory=${encodeURIComponent(subcategory)}&is_recurring=true`}
+                          className="text-indigo-600 hover:underline"
+                        >
+                          {subcategory}
+                        </Link>
+                      </td>
                       <td className="px-4 py-1.5 text-right text-gray-600">
                         {formatAmount(subMonthly)}
                       </td>

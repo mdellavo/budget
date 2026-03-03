@@ -60,4 +60,8 @@ export const handlers = [
   http.get("/api/monthly/:month/summary", () => HttpResponse.json(null, { status: 502 })),
   http.get("/api/yearly/:year/summary", () => HttpResponse.json(null, { status: 502 })),
   http.get("/api/overview/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/budgets/:month/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/categories/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/recurring/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.get("/api/category-trends/summary", () => HttpResponse.json(null, { status: 502 })),
 ];

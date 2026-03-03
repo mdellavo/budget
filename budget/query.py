@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import and_, case, delete, func, or_, select, text, update
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .models import (
     Account,
+    AiSummaryCache,
     Budget,
     CardHolder,
     Category,
@@ -39,7 +41,11 @@ class AnalyticsQueries:
             stmt = stmt.where(Category.user_id == self.user_id)
         return stmt.scalar_subquery()
 
-    async def get_recurring_transactions(self) -> list:
+    async def get_recurring_transactions(
+        self,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list:
         stmt = (
             select(
                 Transaction.date,
@@ -57,6 +63,10 @@ class AnalyticsQueries:
             .where(Transaction.is_recurring == True, *self._user_filter())  # noqa: E712
             .order_by(Transaction.date)
         )
+        if date_from is not None:
+            stmt = stmt.where(Transaction.date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Transaction.date <= date_to)
         rows = (await self.db.execute(stmt)).all()
         return rows
 
@@ -345,6 +355,41 @@ class AnalyticsQueries:
                 )
                 .group_by(Category.name)
                 .order_by(func.sum(Transaction.amount).desc())
+            )
+        ).all()
+        return rows
+
+    async def get_expenses_by_merchant(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list:
+        """Return merchants ranked by total expense (most negative first)."""
+        date_filters = []
+        if date_from:
+            date_filters.append(Transaction.date >= date_from)
+        if date_to:
+            date_filters.append(Transaction.date <= date_to)
+        rows = (
+            await self.db.execute(
+                select(
+                    func.coalesce(Merchant.name, Transaction.description).label("name"),
+                    func.sum(Transaction.amount).label("total"),
+                )
+                .select_from(Transaction)
+                .outerjoin(Merchant, Transaction.merchant_id == Merchant.id)
+                .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
+                .where(
+                    Transaction.amount < 0,
+                    *self._user_filter(),
+                    *date_filters,
+                    or_(
+                        Subcategory.category_id.is_(None),
+                        ~Subcategory.category_id.in_(self._transfer_cat_subq()),
+                    ),
+                )
+                .group_by(func.coalesce(Merchant.name, Transaction.description))
+                .order_by(func.sum(Transaction.amount).asc())
             )
         ).all()
         return rows
@@ -1237,6 +1282,9 @@ class TransactionQueries:
         account=None,
         import_id=None,
         is_recurring=None,
+        is_refund=None,
+        is_international=None,
+        payment_channel=None,
         uncategorized=None,
         cardholder=None,
         tag=None,
@@ -1278,6 +1326,12 @@ class TransactionQueries:
             conditions.append(Transaction.csv_import_id == import_id)
         if is_recurring is not None:
             conditions.append(Transaction.is_recurring == is_recurring)
+        if is_refund is not None:
+            conditions.append(Transaction.is_refund == is_refund)
+        if is_international is not None:
+            conditions.append(Transaction.is_international == is_international)
+        if payment_channel is not None:
+            conditions.append(Transaction.payment_channel == payment_channel)
         if uncategorized:
             conditions.append(Transaction.subcategory_id.is_(None))
         if cardholder:
@@ -1636,3 +1690,60 @@ class BudgetQueries:
                 .order_by(func.sum(Transaction.amount).asc())
             )
         return (await self.db.execute(stmt)).all()
+
+
+class AiSummaryCacheQueries:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
+        self.db = db
+        self.user_id = user_id
+
+    async def get(self, period_type: str, period_key: str) -> dict | None:
+        if self.user_id is None:
+            return None
+        row = await self.db.scalar(
+            select(AiSummaryCache).where(
+                AiSummaryCache.user_id == self.user_id,
+                AiSummaryCache.period_type == period_type,
+                AiSummaryCache.period_key == period_key,
+            )
+        )
+        return json.loads(row.summary_json) if row else None
+
+    async def set(self, period_type: str, period_key: str, summary: dict) -> None:
+        if self.user_id is None:
+            return
+        await self.db.execute(
+            insert(AiSummaryCache)
+            .values(
+                user_id=self.user_id,
+                period_type=period_type,
+                period_key=period_key,
+                summary_json=json.dumps(summary),
+                generated_at=datetime.utcnow(),
+            )
+            .on_conflict_do_update(
+                index_elements=["user_id", "period_type", "period_key"],
+                set_={
+                    "summary_json": json.dumps(summary),
+                    "generated_at": datetime.utcnow(),
+                },
+            )
+        )
+
+    async def invalidate_all(self) -> None:
+        if self.user_id is None:
+            return
+        await self.db.execute(
+            delete(AiSummaryCache).where(AiSummaryCache.user_id == self.user_id)
+        )
+
+    async def invalidate_period(self, period_type: str, period_key: str) -> None:
+        if self.user_id is None:
+            return
+        await self.db.execute(
+            delete(AiSummaryCache).where(
+                AiSummaryCache.user_id == self.user_id,
+                AiSummaryCache.period_type == period_type,
+                AiSummaryCache.period_key == period_key,
+            )
+        )

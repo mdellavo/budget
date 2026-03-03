@@ -771,6 +771,66 @@ class TestAnalytics:
         assert float(summary["income"]) == pytest.approx(1000.0)
         assert float(summary["expenses"]) == pytest.approx(-200.0)
         assert "category_breakdown" in data
+        # pct change fields present (null when no prior month)
+        assert "income_pct_change" in summary
+        assert "expenses_pct_change" in summary
+        assert "net_pct_change" in summary
+        assert summary["income_pct_change"] is None
+        assert summary["expenses_pct_change"] is None
+        assert summary["net_pct_change"] is None
+
+    async def test_monthly_report_pct_change(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        # Prior month: income 1000, expenses -500
+        await make_transaction(
+            acct.id, amount=Decimal("1000.00"), txn_date=date(2024, 1, 5)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-500.00"), txn_date=date(2024, 1, 10)
+        )
+        # Current month: income 1200, expenses -400
+        await make_transaction(
+            acct.id, amount=Decimal("1200.00"), txn_date=date(2024, 2, 5)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-400.00"), txn_date=date(2024, 2, 10)
+        )
+        r = await client.get("/monthly/2024-02")
+        assert r.status_code == 200
+        data = r.json()
+        summary = data["summary"]
+        # income: (1200 - 1000) / 1000 * 100 = 20.0
+        assert summary["income_pct_change"] == pytest.approx(20.0)
+        # expenses: (|-400| - |-500|) / |-500| * 100 = -20.0
+        assert summary["expenses_pct_change"] == pytest.approx(-20.0)
+        # net: (800 - 500) / 500 * 100 = 60.0
+        assert summary["net_pct_change"] == pytest.approx(60.0)
+        # category breakdown: uncategorized expenses -400 vs -500 → -20.0%
+        cat = data["category_breakdown"][0]
+        assert "pct_change" in cat
+        assert cat["pct_change"] == pytest.approx(-20.0)
+        assert "pct_change" in cat["subcategories"][0]
+        assert cat["subcategories"][0]["pct_change"] == pytest.approx(-20.0)
+
+    async def test_monthly_breakdown_pct_change_null_for_new_category(
+        self, client, make_account, make_transaction, make_category
+    ):
+        acct = await make_account()
+        _, sub = await make_category("Dining", "Restaurants")
+        # Expenses only in current month (no prior month) → pct_change should be null
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-300.00"),
+            txn_date=date(2024, 3, 10),
+            subcategory_id=sub.id,
+        )
+        r = await client.get("/monthly/2024-03")
+        assert r.status_code == 200
+        cat = r.json()["category_breakdown"][0]
+        assert cat["pct_change"] is None
+        assert cat["subcategories"][0]["pct_change"] is None
 
     async def test_overview(self, client, make_account, make_transaction):
         acct = await make_account()
@@ -1696,6 +1756,66 @@ class TestYearly:
         assert float(summary["expenses"]) == pytest.approx(-1200.0)
         assert float(summary["net"]) == pytest.approx(3800.0)
         assert "category_breakdown" in data
+        # pct change fields present (null when no prior year)
+        assert "income_pct_change" in summary
+        assert "expenses_pct_change" in summary
+        assert "net_pct_change" in summary
+        assert summary["income_pct_change"] is None
+        assert summary["expenses_pct_change"] is None
+        assert summary["net_pct_change"] is None
+
+    async def test_get_yearly_report_pct_change(
+        self, client, make_account, make_transaction
+    ):
+        acct = await make_account()
+        # Prior year: income 10000, expenses -3000
+        await make_transaction(
+            acct.id, amount=Decimal("10000.00"), txn_date=date(2023, 6, 1)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-3000.00"), txn_date=date(2023, 6, 15)
+        )
+        # Current year: income 12000, expenses -2400
+        await make_transaction(
+            acct.id, amount=Decimal("12000.00"), txn_date=date(2024, 6, 1)
+        )
+        await make_transaction(
+            acct.id, amount=Decimal("-2400.00"), txn_date=date(2024, 6, 15)
+        )
+        r = await client.get("/yearly/2024")
+        assert r.status_code == 200
+        data = r.json()
+        summary = data["summary"]
+        # income: (12000 - 10000) / 10000 * 100 = 20.0
+        assert summary["income_pct_change"] == pytest.approx(20.0)
+        # expenses: (|-2400| - |-3000|) / |-3000| * 100 = -20.0
+        assert summary["expenses_pct_change"] == pytest.approx(-20.0)
+        # net: (9600 - 7000) / 7000 * 100 = 37.1
+        assert summary["net_pct_change"] == pytest.approx(37.1, abs=0.2)
+        # category breakdown: uncategorized expenses -2400 vs -3000 → -20.0%
+        cat = data["category_breakdown"][0]
+        assert "pct_change" in cat
+        assert cat["pct_change"] == pytest.approx(-20.0)
+        assert "pct_change" in cat["subcategories"][0]
+        assert cat["subcategories"][0]["pct_change"] == pytest.approx(-20.0)
+
+    async def test_yearly_breakdown_pct_change_null_for_new_category(
+        self, client, make_account, make_transaction, make_category
+    ):
+        acct = await make_account()
+        _, sub = await make_category("Travel", "Flights")
+        # Expenses only in current year (no prior year) → pct_change should be null
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-500.00"),
+            txn_date=date(2024, 7, 1),
+            subcategory_id=sub.id,
+        )
+        r = await client.get("/yearly/2024")
+        assert r.status_code == 200
+        cat = r.json()["category_breakdown"][0]
+        assert cat["pct_change"] is None
+        assert cat["subcategories"][0]["pct_change"] is None
 
     async def test_get_yearly_report_empty_year(self, client):
         r = await client.get("/yearly/2099")
@@ -2035,3 +2155,256 @@ class TestBudgets:
         data = r.json()
         assert data["created"] == 0
         assert data["skipped"] == 2
+
+
+class TestBudgetSummary:
+    FAKE_SUMMARY = {
+        "narrative": "Budget overview for the month.",
+        "insights": ["Spending on Food is 80% of limit."],
+        "recommendations": ["Reduce dining out."],
+    }
+
+    async def test_get_budget_summary_returns_narrative_insights_recommendations(
+        self, client, make_category, mocker
+    ):
+        cat, _sub = await make_category("Food & Drink", "Restaurants")
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "300.00"}
+        )
+        mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        r = await client.get("/budgets/2026-03/summary")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["narrative"] == "Budget overview for the month."
+        assert data["insights"] == ["Spending on Food is 80% of limit."]
+        assert data["recommendations"] == ["Reduce dining out."]
+
+    async def test_get_budget_summary_cached_on_second_call(
+        self, client, make_category, mocker
+    ):
+        cat, _sub = await make_category("Food & Drink", "Restaurants")
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "300.00"}
+        )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/budgets/2026-03/summary")
+        await client.get("/budgets/2026-03/summary")
+        assert mock_summarize.call_count == 1
+
+    async def test_get_budget_summary_force_bypasses_cache(
+        self, client, make_category, mocker
+    ):
+        cat, _sub = await make_category("Food & Drink", "Restaurants")
+        await client.post(
+            "/budgets", json={"category_id": cat.id, "amount_limit": "300.00"}
+        )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/budgets/2026-03/summary")
+        await client.get("/budgets/2026-03/summary", params={"force": "true"})
+        assert mock_summarize.call_count == 2
+
+
+class TestCategoriesSummary:
+    FAKE_SUMMARY = {
+        "narrative": "Category spending overview.",
+        "insights": ["Food is the top category."],
+        "recommendations": ["Cut restaurant spending."],
+    }
+
+    async def test_returns_narrative_insights_recommendations(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(acct.id, amount=Decimal("-50.00"), subcategory_id=sub.id)
+        mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        r = await client.get("/categories/summary")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["narrative"] == "Category spending overview."
+        assert data["insights"] == ["Food is the top category."]
+        assert data["recommendations"] == ["Cut restaurant spending."]
+
+    async def test_cached_on_second_call(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(acct.id, amount=Decimal("-50.00"), subcategory_id=sub.id)
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/categories/summary")
+        await client.get("/categories/summary")
+        assert mock_summarize.call_count == 1
+
+    async def test_force_bypasses_cache(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(acct.id, amount=Decimal("-50.00"), subcategory_id=sub.id)
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/categories/summary")
+        await client.get("/categories/summary", params={"force": "true"})
+        assert mock_summarize.call_count == 2
+
+
+class TestRecurringSummary:
+    FAKE_SUMMARY = {
+        "narrative": "You have several recurring charges.",
+        "insights": ["Netflix costs $15.99/month."],
+        "recommendations": ["Review unused subscriptions."],
+    }
+
+    async def test_returns_narrative_insights_recommendations(
+        self, client, make_account, make_transaction, make_merchant, mocker
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Netflix")
+        for i in range(3):
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-15.99"),
+                merchant_id=merchant.id,
+                txn_date=date(2026, i + 1, 15),
+                is_recurring=True,
+            )
+        mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        r = await client.get("/recurring/summary")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["narrative"] == "You have several recurring charges."
+        assert data["insights"] == ["Netflix costs $15.99/month."]
+        assert data["recommendations"] == ["Review unused subscriptions."]
+
+    async def test_cached_on_second_call(
+        self, client, make_account, make_transaction, make_merchant, mocker
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Spotify")
+        for i in range(3):
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-9.99"),
+                merchant_id=merchant.id,
+                txn_date=date(2026, i + 1, 1),
+                is_recurring=True,
+            )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/recurring/summary")
+        await client.get("/recurring/summary")
+        assert mock_summarize.call_count == 1
+
+    async def test_force_bypasses_cache(
+        self, client, make_account, make_transaction, make_merchant, mocker
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Adobe")
+        for i in range(3):
+            await make_transaction(
+                acct.id,
+                amount=Decimal("-54.99"),
+                merchant_id=merchant.id,
+                txn_date=date(2026, i + 1, 5),
+                is_recurring=True,
+            )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/recurring/summary")
+        await client.get("/recurring/summary", params={"force": "true"})
+        assert mock_summarize.call_count == 2
+
+
+class TestTrendsSummary:
+    FAKE_SUMMARY = {
+        "narrative": "Your spending trends show steady growth.",
+        "insights": ["Food & Drink is the top category."],
+        "recommendations": ["Track grocery vs restaurant spending separately."],
+    }
+
+    async def test_returns_narrative_insights_recommendations(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Food & Drink", "Restaurants")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-100.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2026, 1, 10),
+        )
+        mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        r = await client.get("/category-trends/summary")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["narrative"] == "Your spending trends show steady growth."
+        assert data["insights"] == ["Food & Drink is the top category."]
+        assert data["recommendations"] == [
+            "Track grocery vs restaurant spending separately."
+        ]
+
+    async def test_cached_on_second_call(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Transport", "Gas")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-50.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2026, 1, 5),
+        )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/category-trends/summary")
+        await client.get("/category-trends/summary")
+        assert mock_summarize.call_count == 1
+
+    async def test_force_bypasses_cache(
+        self, client, make_account, make_category, make_transaction, mocker
+    ):
+        acct = await make_account()
+        cat, sub = await make_category("Entertainment", "Streaming")
+        await make_transaction(
+            acct.id,
+            amount=Decimal("-20.00"),
+            subcategory_id=sub.id,
+            txn_date=date(2026, 2, 1),
+        )
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=self.FAKE_SUMMARY,
+        )
+        await client.get("/category-trends/summary")
+        await client.get("/category-trends/summary", params={"force": "true"})
+        assert mock_summarize.call_count == 2

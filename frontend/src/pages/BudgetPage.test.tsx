@@ -165,4 +165,35 @@ describe("BudgetPage", () => {
     expect(screen.getByText("Entertainment")).toBeInTheDocument();
     expect(screen.getByText("Transport")).toBeInTheDocument();
   });
+
+  it("shows AI summary card when summary API returns data", async () => {
+    server.use(
+      http.get("/api/budgets", () => HttpResponse.json({ items: [BUDGET_FOOD], month: "2026-03" })),
+      http.get("/api/budgets/:month/summary", () =>
+        HttpResponse.json({
+          narrative: "Good month overall.",
+          insights: ["Food spending is on track."],
+          recommendations: ["Keep it up!"],
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("AI Summary");
+    expect(screen.getByText("Good month overall.")).toBeInTheDocument();
+  });
+
+  it("does not show AI summary card when no budgets exist", async () => {
+    server.use(
+      http.get("/api/budgets/:month/summary", () =>
+        HttpResponse.json({
+          narrative: "Good month overall.",
+          insights: ["No budgets set."],
+          recommendations: ["Add a budget."],
+        })
+      )
+    );
+    renderPage(); // default /api/budgets returns empty list
+    await screen.findByText(/No budgets yet/i);
+    expect(screen.queryByText("AI Summary")).not.toBeInTheDocument();
+  });
 });

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import HelpIcon from "../components/HelpIcon";
+import AiSummaryCard from "../components/AiSummaryCard";
 import { parseAmount } from "../lib/format";
 import {
   listBudgets,
@@ -11,11 +12,13 @@ import {
   getBudgetWizard,
   createBudgetsBatch,
   getOverview,
+  getBudgetSummary,
 } from "../api/client";
 import type {
   BudgetItem,
   CategoryClassification,
   CategoryOption,
+  ReportSummary,
   WizardResponse,
   WizardSuggestion,
 } from "../types";
@@ -959,6 +962,9 @@ export default function BudgetPage() {
   const [historicalData, setHistoricalData] = useState<Record<string, BudgetItem[]>>({});
   const [historicalLoading, setHistoricalLoading] = useState(false);
 
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
   async function loadBudgets(m: string) {
     setLoading(true);
     setError(null);
@@ -1019,6 +1025,24 @@ export default function BudgetPage() {
       loadHistorical(budgets);
     }
   }, [loading, budgets.length]);
+
+  useEffect(() => {
+    setSummary(null);
+    setSummaryLoading(true);
+    getBudgetSummary(month)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [month]);
+
+  const handleRegenerateSummary = useCallback(() => {
+    setSummary(null);
+    setSummaryLoading(true);
+    getBudgetSummary(month, true)
+      .then(setSummary)
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, [month]);
 
   async function handleCreate(
     categoryId: number | null,
@@ -1239,6 +1263,14 @@ export default function BudgetPage() {
                     </div>
                   </div>
                 </div>
+              )}
+              {(summaryLoading || summary) && (
+                <AiSummaryCard
+                  summary={summary}
+                  loading={summaryLoading}
+                  onRegenerate={handleRegenerateSummary}
+                  className="mb-6"
+                />
               )}
               <div className="space-y-4">
                 {budgets.map((b) => (
