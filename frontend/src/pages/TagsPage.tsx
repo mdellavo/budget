@@ -72,7 +72,7 @@ export default function TagsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="mb-6">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold text-gray-900">Tags</h1>
@@ -89,7 +89,7 @@ export default function TagsPage() {
         className="mb-6 bg-white border border-gray-200 rounded-md shadow-sm p-4"
       >
         <div className="flex gap-3 flex-wrap items-end">
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Name</label>
             <input
               type="text"

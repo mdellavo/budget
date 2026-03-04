@@ -122,7 +122,7 @@ export default function AccountsPage() {
   const allRows = pages.flat();
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Accounts</h1>
         <HelpIcon section="accounts" />
@@ -135,7 +135,7 @@ export default function AccountsPage() {
         className="mb-6 bg-white border border-gray-200 rounded-md shadow-sm p-4"
       >
         <div className="flex gap-3 flex-wrap items-end">
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Name</label>
             <input
               type="text"
@@ -145,7 +145,7 @@ export default function AccountsPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Institution</label>
             <input
               type="text"
@@ -155,7 +155,7 @@ export default function AccountsPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Type</label>
             <input
               type="text"

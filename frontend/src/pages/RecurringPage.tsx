@@ -176,7 +176,7 @@ export default function RecurringPage() {
   }, [items]);
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">Recurring Charges</h1>
         <HelpIcon section="recurring" />

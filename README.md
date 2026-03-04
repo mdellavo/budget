@@ -193,6 +193,76 @@ python scripts/seed_user.py --email you@example.com --name "Your Name" --passwor
 
 A Google sign-in button will appear on the login page. First sign-in creates a new account; subsequent sign-ins reuse it. Existing email/password accounts are automatically linked on first Google sign-in.
 
+### Deploy to AWS (ECS Fargate + CloudFront + RDS)
+
+The `infra/` directory contains a Terraform module that provisions:
+- **ECS Fargate** — backend API in private subnets
+- **RDS PostgreSQL 16** — managed database (replaces SQLite)
+- **CloudFront + S3** — frontend SPA served from S3; `/api/*` routed to the API via ALB
+- **Secrets Manager** — stores API keys and the database URL
+
+#### Prerequisites
+- AWS CLI configured with sufficient IAM permissions
+- Terraform ≥ 1.6
+- Docker (with `buildx` for `linux/amd64` cross-builds on Apple Silicon)
+
+#### First-time deploy
+
+```bash
+cd infra
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your secrets and region
+
+# 1. Create ECR first so you can push an image before ECS tries to pull it
+terraform init
+terraform apply -target=aws_ecr_repository.api
+
+# 2. Build and push the API image
+ECR_URL=$(terraform output -raw ecr_repository_url)
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_URL
+docker build --platform linux/amd64 -t ${ECR_URL}:latest .
+docker push ${ECR_URL}:latest
+
+# 3. Apply all remaining infrastructure (~15 min)
+terraform apply
+
+# 4. Build and deploy the frontend
+cd ../frontend && npm ci && npm run build
+S3=$(cd ../infra && terraform output -raw s3_frontend_bucket)
+CF=$(cd ../infra && terraform output -raw cloudfront_distribution_id)
+aws s3 sync dist/ s3://${S3}/ --delete \
+  --cache-control "public,max-age=31536000,immutable" --exclude "index.html"
+aws s3 cp dist/index.html s3://${S3}/index.html \
+  --cache-control "no-cache,no-store,must-revalidate"
+aws cloudfront create-invalidation --distribution-id ${CF} --paths "/*"
+
+# 5. Seed the first user via ECS Exec
+CLUSTER=$(cd ../infra && terraform output -raw ecs_cluster_name)
+TASK=$(aws ecs list-tasks --cluster $CLUSTER --service-name api --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster $CLUSTER --task $TASK --container api --interactive \
+  --command "python scripts/seed_user.py --email you@example.com --name 'Your Name' --password yourpass"
+```
+
+The app will be available at the URL printed by `terraform output cloudfront_url`.
+
+#### Subsequent deploys
+
+```bash
+# Backend
+docker build --platform linux/amd64 -t ${ECR_URL}:latest . && docker push ${ECR_URL}:latest
+aws ecs update-service --cluster $CLUSTER --service api --force-new-deployment
+
+# Frontend
+npm run build && aws s3 sync dist/ s3://${S3}/ --delete \
+  --cache-control "public,max-age=31536000,immutable" --exclude "index.html"
+aws s3 cp dist/index.html s3://${S3}/index.html --cache-control "no-cache,no-store,must-revalidate"
+aws cloudfront create-invalidation --distribution-id ${CF} --paths "/*"
+```
+
+#### Custom domain
+
+Set `domain_name` and `acm_certificate_arn` in `terraform.tfvars`. The ACM certificate must be in `us-east-1` (CloudFront requirement) and cover your domain. Add the CloudFront domain as a CNAME in your DNS provider.
+
 ## TODO
 
 ### AI-powered analysis

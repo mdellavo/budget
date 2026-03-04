@@ -1171,3 +1171,109 @@ class TestBudgetQueries:
         bq = BudgetQueries(db_session, user_id=1)
         rows = await bq.get_spending_averages([], scope="category")
         assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# TransactionQueries.match_transfers
+# ---------------------------------------------------------------------------
+
+
+class TestMatchTransfers:
+    async def test_links_valid_pair(self, db_session, make_account, make_transaction):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        debit = await make_transaction(
+            acct1.id,
+            amount=Decimal("-500.00"),
+            txn_date=date(2024, 3, 1),
+            payment_channel="transfer",
+        )
+        credit = await make_transaction(
+            acct2.id,
+            amount=Decimal("500.00"),
+            txn_date=date(2024, 3, 2),
+            payment_channel="transfer",
+        )
+        tq = TransactionQueries(db_session, user_id=1)
+        pairs = await tq.match_transfers()
+        await db_session.commit()
+        await db_session.refresh(debit)
+        await db_session.refresh(credit)
+        assert pairs == 1
+        assert debit.linked_transaction_id == credit.id
+        assert credit.linked_transaction_id == debit.id
+
+    async def test_does_not_link_beyond_5_days(
+        self, db_session, make_account, make_transaction
+    ):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        debit = await make_transaction(
+            acct1.id,
+            amount=Decimal("-500.00"),
+            txn_date=date(2024, 3, 1),
+            payment_channel="transfer",
+        )
+        credit = await make_transaction(
+            acct2.id,
+            amount=Decimal("500.00"),
+            txn_date=date(2024, 3, 8),  # 7 days later
+            payment_channel="transfer",
+        )
+        tq = TransactionQueries(db_session, user_id=1)
+        pairs = await tq.match_transfers()
+        await db_session.commit()
+        await db_session.refresh(debit)
+        await db_session.refresh(credit)
+        assert pairs == 0
+        assert debit.linked_transaction_id is None
+        assert credit.linked_transaction_id is None
+
+    async def test_does_not_link_same_account(
+        self, db_session, make_account, make_transaction
+    ):
+        acct = await make_account("Checking")
+        debit = await make_transaction(
+            acct.id,
+            amount=Decimal("-500.00"),
+            txn_date=date(2024, 3, 1),
+            payment_channel="transfer",
+        )
+        credit = await make_transaction(
+            acct.id,
+            amount=Decimal("500.00"),
+            txn_date=date(2024, 3, 1),
+            payment_channel="transfer",
+        )
+        tq = TransactionQueries(db_session, user_id=1)
+        pairs = await tq.match_transfers()
+        await db_session.commit()
+        await db_session.refresh(debit)
+        await db_session.refresh(credit)
+        assert pairs == 0
+        assert debit.linked_transaction_id is None
+        assert credit.linked_transaction_id is None
+
+    async def test_is_idempotent(self, db_session, make_account, make_transaction):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        await make_transaction(
+            acct1.id,
+            amount=Decimal("-200.00"),
+            txn_date=date(2024, 3, 1),
+            payment_channel="transfer",
+        )
+        await make_transaction(
+            acct2.id,
+            amount=Decimal("200.00"),
+            txn_date=date(2024, 3, 2),
+            payment_channel="transfer",
+        )
+        tq = TransactionQueries(db_session, user_id=1)
+        pairs1 = await tq.match_transfers()
+        await db_session.commit()
+        # Run again — should not create extra pairs
+        pairs2 = await tq.match_transfers()
+        await db_session.commit()
+        assert pairs1 == 1
+        assert pairs2 == 0

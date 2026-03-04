@@ -19,13 +19,13 @@ import ComboBox from "../components/ComboBox";
 
 type SortKey = "date" | "amount" | "description" | "merchant" | "category" | "account";
 
-const COLUMNS: { label: string; key: SortKey; rightAlign?: boolean }[] = [
+const COLUMNS: { label: string; key: SortKey; rightAlign?: boolean; hiddenClass?: string }[] = [
   { label: "Date", key: "date" },
   { label: "Description", key: "description" },
-  { label: "Merchant", key: "merchant" },
-  { label: "Category / Subcategory", key: "category" },
+  { label: "Merchant", key: "merchant", hiddenClass: "hidden sm:table-cell" },
+  { label: "Category / Subcategory", key: "category", hiddenClass: "hidden md:table-cell" },
   { label: "Amount", key: "amount", rightAlign: true },
-  { label: "Account", key: "account" },
+  { label: "Account", key: "account", hiddenClass: "hidden md:table-cell" },
 ];
 
 function formatAmount(amount: string): { text: string; positive: boolean } {
@@ -159,6 +159,7 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
   const [allTags, setAllTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [reEnriching, setReEnriching] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [merchantSuggestions, setMerchantSuggestions] = useState<string[]>([]);
@@ -269,6 +270,28 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
       setError(e instanceof Error ? e.message : "Re-enrich failed");
     } finally {
       setReEnriching(false);
+    }
+  }
+
+  async function handleUnlink() {
+    setUnlinking(true);
+    setError(null);
+    try {
+      const updated = await updateTransaction(tx.id, {
+        description: form.description,
+        merchant_name: form.merchant.trim() || null,
+        category: form.category.trim() || null,
+        subcategory: form.subcategory.trim() || null,
+        notes: form.notes.trim() || null,
+        card_number: form.card_number.trim() || null,
+        tags,
+        clear_linked_transaction: true,
+      });
+      onSaved(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to unlink");
+    } finally {
+      setUnlinking(false);
     }
   }
 
@@ -503,6 +526,22 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
               {tagError && <p className="mt-1 text-xs text-red-600">{tagError}</p>}
             </div>
           </div>
+
+          {tx.linked_transaction_id != null && (
+            <div className="flex items-center gap-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded text-sm">
+              <span className="text-indigo-400">↔</span>
+              <span className="text-indigo-700 font-medium">Linked transfer</span>
+              <span className="text-indigo-500 text-xs font-mono">#{tx.linked_transaction_id}</span>
+              <button
+                type="button"
+                onClick={handleUnlink}
+                disabled={unlinking || saving}
+                className="ml-auto px-2.5 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-red-400"
+              >
+                {unlinking ? "Unlinking…" : "Unlink"}
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
@@ -1261,7 +1300,7 @@ export default function TransactionsPage() {
   }, [someSelected, allSelected]);
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       {viewingTx && !editingTx && (
         <TransactionDetailModal
           tx={viewingTx}
@@ -1615,10 +1654,10 @@ export default function TransactionsPage() {
                   className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 />
               </th>
-              {COLUMNS.map(({ label, key, rightAlign }) => (
+              {COLUMNS.map(({ label, key, rightAlign, hiddenClass }) => (
                 <th
                   key={key}
-                  className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"}`}
+                  className={`px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${rightAlign ? "text-right" : "text-left"} ${hiddenClass ?? ""}`}
                 >
                   <button
                     onClick={() => handleSort(key)}
@@ -1691,7 +1730,7 @@ export default function TransactionsPage() {
                       />
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap text-gray-600">{row.date}</td>
-                    <td className="px-4 py-2 text-gray-800">
+                    <td className="px-4 py-2 text-gray-800 max-w-[10rem] truncate">
                       {row.description}
                       {row.is_recurring && (
                         <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">
@@ -1716,7 +1755,7 @@ export default function TransactionsPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-gray-600">
+                    <td className="px-4 py-2 text-gray-600 hidden sm:table-cell">
                       {row.merchant ? (
                         <div className="flex items-center gap-1.5">
                           <MerchantLogo
@@ -1730,7 +1769,7 @@ export default function TransactionsPage() {
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-gray-600">
+                    <td className="px-4 py-2 text-gray-600 hidden md:table-cell">
                       {category || <span className="text-gray-300">—</span>}
                     </td>
                     <td
@@ -1740,7 +1779,7 @@ export default function TransactionsPage() {
                     >
                       {text}
                     </td>
-                    <td className="px-4 py-2 text-gray-600">{row.account}</td>
+                    <td className="px-4 py-2 text-gray-600 hidden md:table-cell">{row.account}</td>
                     <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => setEditingTx(row)}

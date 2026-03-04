@@ -284,6 +284,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE transactions ADD COLUMN fingerprint TEXT",
             "ALTER TABLE csv_imports ADD COLUMN skipped_duplicates INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE transactions ADD COLUMN is_excluded BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE transactions ADD COLUMN linked_transaction_id INTEGER REFERENCES transactions(id)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -522,6 +523,11 @@ def _budget_row_to_dict(row, spent: Decimal, forecast: Decimal | None) -> dict:
         "forecast_pct": forecast_pct,
         "severity": severity,
     }
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.post("/auth/login")
@@ -825,6 +831,12 @@ async def _run_enrichment(
                         csv_import_id,
                     )
                     return  # Do NOT mark complete
+
+    if user_id is not None:
+        async with AsyncSessionLocal() as db:
+            tq = TransactionQueries(db, user_id=user_id)
+            await tq.match_transfers()
+            await db.commit()
 
     async with AsyncSessionLocal() as db:
         csq = CsvImportQueries(db)
@@ -2189,6 +2201,7 @@ async def list_transactions(
                 "cardholder_name": tx.cardholder.name if tx.cardholder else None,
                 "card_number": tx.cardholder.card_number if tx.cardholder else None,
                 "tags": [t.name for t in tx.tags],
+                "linked_transaction_id": tx.linked_transaction_id,
             }
             for tx in items
         ],
@@ -2213,6 +2226,8 @@ class TransactionUpdate(BaseModel):
     card_number: str | None = None  # None = clear cardholder
     tags: list[str] = []
     is_excluded: bool | None = None
+    linked_transaction_id: int | None = None  # sentinel: missing = not updated
+    clear_linked_transaction: bool = False  # True = explicitly unlink
 
 
 @app.patch("/transactions/{transaction_id}")
@@ -2265,6 +2280,27 @@ async def update_transaction(
     # Tags
     await txq.set_transaction_tags(tx, body.tags)
 
+    # Transfer link: bidirectional set/clear
+    if body.linked_transaction_id is not None:
+        # Clear old counterpart if switching links
+        if (
+            tx.linked_transaction_id
+            and tx.linked_transaction_id != body.linked_transaction_id
+        ):
+            old_other = await txq.get_by_id(tx.linked_transaction_id)
+            if old_other is not None:
+                old_other.linked_transaction_id = None
+        tx.linked_transaction_id = body.linked_transaction_id
+        other = await txq.get_by_id(body.linked_transaction_id)
+        if other is not None:
+            other.linked_transaction_id = tx.id
+    elif body.clear_linked_transaction:
+        if tx.linked_transaction_id:
+            old_other = await txq.get_by_id(tx.linked_transaction_id)
+            if old_other is not None:
+                old_other.linked_transaction_id = None
+        tx.linked_transaction_id = None
+
     month_key = tx.date.strftime("%Y-%m")
     year_key = str(tx.date.year)
     await db.commit()
@@ -2299,6 +2335,7 @@ async def update_transaction(
         "cardholder_name": tx.cardholder.name if tx.cardholder else None,
         "card_number": tx.cardholder.card_number if tx.cardholder else None,
         "tags": [t.name for t in tx.tags],
+        "linked_transaction_id": tx.linked_transaction_id,
     }
 
 
@@ -2329,6 +2366,7 @@ def _serialize_tx(tx: Transaction) -> dict:
         "cardholder_name": tx.cardholder.name if tx.cardholder else None,
         "card_number": tx.cardholder.card_number if tx.cardholder else None,
         "tags": [t.name for t in tx.tags],
+        "linked_transaction_id": tx.linked_transaction_id,
     }
 
 
@@ -2340,6 +2378,22 @@ async def list_duplicate_transactions(
     txq = TransactionQueries(db, user_id=current_user.id)
     groups = await txq.find_duplicates()
     return {"groups": [[_serialize_tx(tx) for tx in group] for group in groups]}
+
+
+# ---------------------------------------------------------------------------
+# POST /transfers/rematch
+# ---------------------------------------------------------------------------
+
+
+@app.post("/transfers/rematch")
+async def rematch_transfers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    txq = TransactionQueries(db, user_id=current_user.id)
+    pairs_linked = await txq.match_transfers()
+    await db.commit()
+    return {"pairs_linked": pairs_linked}
 
 
 class ReEnrichRequest(BaseModel):

@@ -454,6 +454,8 @@ export interface TransactionUpdateBody {
   card_number?: string | null;
   tags?: string[];
   is_excluded?: boolean;
+  linked_transaction_id?: number | null;
+  clear_linked_transaction?: boolean;
 }
 
 export async function updateTransaction(
@@ -725,4 +727,10 @@ export async function fetchTags(): Promise<{ items: string[] }> {
     await fetch(`${BASE}/tags`, { headers: authHeaders() })
   );
   return { items: res.items.map((t) => t.name) };
+}
+
+export async function rematchTransfers(): Promise<{ pairs_linked: number }> {
+  return handleResponse<{ pairs_linked: number }>(
+    await fetch(`${BASE}/transfers/rematch`, { method: "POST", headers: authHeaders() })
+  );
 }

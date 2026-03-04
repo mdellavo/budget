@@ -1,6 +1,6 @@
 export default function HelpPage() {
   return (
-    <div className="p-8 max-w-3xl">
+    <div className="p-4 md:p-8 max-w-3xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Help &amp; Documentation</h1>
       <p className="text-gray-500 mb-8">Reference guide for all features in Budget.</p>
 
@@ -73,6 +73,11 @@ export default function HelpPage() {
           <li>
             <a href="#duplicates" className="hover:underline">
               Duplicate Transactions
+            </a>
+          </li>
+          <li>
+            <a href="#transfers" className="hover:underline">
+              Transfers &amp; Double Counting
             </a>
           </li>
           <li>
@@ -681,6 +686,63 @@ export default function HelpPage() {
                 where the same transaction appears in two different CSV files.
               </li>
             </ul>
+          </div>
+        </section>
+
+        {/* Transfers */}
+        <section id="transfers">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">
+            Transfers &amp; Double Counting
+          </h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              When you transfer money between accounts (e.g. from checking to savings), both legs of
+              the transfer appear as separate transactions in your imports: a debit on the source
+              account and a credit on the destination account. The app automatically assigns these
+              the <strong>Transfer</strong> category, which is excluded from all income and expense
+              totals — so neither leg inflates your spending or income figures.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Auto-matching</h3>
+            <p>
+              After each import, the app attempts to link the two legs of every transfer pair. Two
+              transactions are considered a pair when they:
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Both have the <em>transfer</em> payment channel
+              </li>
+              <li>Have opposite signs and the same absolute amount</li>
+              <li>Occur within 5 calendar days of each other (to allow for settlement delays)</li>
+              <li>Belong to different accounts</li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Transfers page</h3>
+            <p>
+              The Transfers page shows all transfer-channel transactions split into two sections:
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>Matched Pairs</strong> — both legs were found and linked. Each pair shows
+                the debit and credit side. Click <strong>Unlink</strong> to break the association.
+              </li>
+              <li>
+                <strong>Unmatched Transfers</strong> — one leg is present but its counterpart is
+                missing or was categorised differently. A yellow warning icon flags these rows.
+                Common causes: only one account was imported, the other leg was categorised under a
+                different category, or the dates are more than 5 days apart.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Re-match</h3>
+            <p>
+              If you fix a miscategorised transfer (e.g. re-categorise it to <em>Transfer</em> in
+              the edit modal), click <strong>Re-match</strong> on the Transfers page to re-run the
+              matching algorithm for your account. Already-linked pairs are not affected.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Edit modal</h3>
+            <p>
+              When editing a transaction that has a linked counterpart, a blue info card shows the
+              link. Click <strong>Unlink</strong> inside the modal to clear both sides of the
+              association.
+            </p>
           </div>
         </section>
       </div>

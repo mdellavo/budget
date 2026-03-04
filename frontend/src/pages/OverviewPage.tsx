@@ -136,7 +136,7 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
         <HelpIcon section="overview" />
@@ -605,7 +605,8 @@ function SankeyChart({
     };
   }, [chartBundle, navigate, dateFrom, dateTo]);
 
-  return <div ref={divRef} style={{ width: "100%", height: 800, cursor: "pointer" }} />;
+  const chartHeight = window.innerWidth < 768 ? 380 : 800;
+  return <div ref={divRef} style={{ width: "100%", height: chartHeight, cursor: "pointer" }} />;
 }
 
 const PALETTE = [
@@ -687,5 +688,6 @@ function DonutChart({ categories, dateFrom, dateTo }: DonutChartProps) {
     };
   }, [trace, layout, config, navigate, dateFrom, dateTo]);
 
-  return <div ref={divRef} style={{ width: "100%", height: 460, cursor: "pointer" }} />;
+  const chartHeight = window.innerWidth < 768 ? 320 : 460;
+  return <div ref={divRef} style={{ width: "100%", height: chartHeight, cursor: "pointer" }} />;
 }

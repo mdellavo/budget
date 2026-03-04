@@ -49,6 +49,7 @@ export interface TransactionItem {
   cardholder_name: string | null;
   card_number: string | null;
   tags: string[];
+  linked_transaction_id: number | null;
 }
 
 export interface TransactionsResponse {

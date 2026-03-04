@@ -23,6 +23,7 @@ const NAV_GROUPS = [
       { to: "/categories", label: "Categories", icon: "🏷️" },
       { to: "/merchants", label: "Merchants", icon: "🏪" },
       { to: "/tags", label: "Tags", icon: "🔖" },
+      { to: "/transfers", label: "Transfers", icon: "↔" },
     ],
   },
   {
@@ -42,7 +43,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors " +
   (isActive ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white");
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { user, logout } = useAuth();
   const [hasInProgress, setHasInProgress] = useState(false);
 
@@ -61,13 +62,15 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-56 shrink-0 bg-gray-900 text-gray-100 flex flex-col h-screen sticky top-0">
+    <aside
+      className={`fixed inset-y-0 left-0 z-30 w-56 bg-gray-900 text-gray-100 flex flex-col transition-transform duration-300 md:sticky md:top-0 md:h-screen md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
+    >
       <div className="px-6 py-5 border-b border-gray-700">
         <span className="text-lg font-semibold tracking-tight">Budget</span>
       </div>
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <div className="space-y-1 mb-4">
-          <NavLink to={OVERVIEW_NAV.to} className={navLinkClass}>
+          <NavLink to={OVERVIEW_NAV.to} className={navLinkClass} onClick={onClose}>
             <span>{OVERVIEW_NAV.icon}</span>
             {OVERVIEW_NAV.label}
           </NavLink>
@@ -79,7 +82,7 @@ export default function Sidebar() {
             </div>
             <div className="space-y-1">
               {items.map(({ to, label: itemLabel, icon }) => (
-                <NavLink key={to} to={to} className={navLinkClass}>
+                <NavLink key={to} to={to} className={navLinkClass} onClick={onClose}>
                   <span>{icon}</span>
                   {itemLabel}
                   {to === "/imports" && hasInProgress && (
@@ -91,7 +94,7 @@ export default function Sidebar() {
           </div>
         ))}
         <div className="mt-4 space-y-1">
-          <NavLink to={HELP_NAV.to} className={navLinkClass}>
+          <NavLink to={HELP_NAV.to} className={navLinkClass} onClick={onClose}>
             <span>{HELP_NAV.icon}</span>
             {HELP_NAV.label}
           </NavLink>

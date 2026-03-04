@@ -3130,3 +3130,103 @@ class TestIsExcluded:
         assert r.status_code == 200
         data = r.json()
         assert Decimal(data["expenses"]) == Decimal("-30.00")
+
+
+# ---------------------------------------------------------------------------
+# Transfer linking via PATCH and POST /transfers/rematch
+# ---------------------------------------------------------------------------
+
+
+class TestTransferLinking:
+    async def test_patch_sets_linked_transaction_id_bidirectionally(
+        self, client, make_account, make_transaction
+    ):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        tx1 = await make_transaction(acct1.id, amount=Decimal("-500.00"))
+        tx2 = await make_transaction(acct2.id, amount=Decimal("500.00"))
+
+        r = await client.patch(
+            f"/transactions/{tx1.id}",
+            json={
+                "description": tx1.description,
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "linked_transaction_id": tx2.id,
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["linked_transaction_id"] == tx2.id
+
+        # Check the counterpart was also updated
+        r2 = await client.get(f"/transactions?account={acct2.name}")
+        items = r2.json()["items"]
+        tx2_data = next(t for t in items if t["id"] == tx2.id)
+        assert tx2_data["linked_transaction_id"] == tx1.id
+
+    async def test_patch_clear_linked_transaction_clears_both_sides(
+        self, client, make_account, make_transaction
+    ):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        tx1 = await make_transaction(acct1.id, amount=Decimal("-300.00"))
+        tx2 = await make_transaction(acct2.id, amount=Decimal("300.00"))
+
+        # Link them first
+        await client.patch(
+            f"/transactions/{tx1.id}",
+            json={
+                "description": tx1.description,
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "linked_transaction_id": tx2.id,
+            },
+        )
+
+        # Now unlink
+        r = await client.patch(
+            f"/transactions/{tx1.id}",
+            json={
+                "description": tx1.description,
+                "merchant_name": None,
+                "category": None,
+                "subcategory": None,
+                "notes": None,
+                "clear_linked_transaction": True,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["linked_transaction_id"] is None
+
+        # Counterpart should also be cleared
+        r2 = await client.get(f"/transactions?account={acct2.name}")
+        items = r2.json()["items"]
+        tx2_data = next(t for t in items if t["id"] == tx2.id)
+        assert tx2_data["linked_transaction_id"] is None
+
+    async def test_rematch_endpoint_returns_pair_count(
+        self, client, make_account, make_transaction
+    ):
+        acct1 = await make_account("Checking")
+        acct2 = await make_account("Savings")
+        await make_transaction(
+            acct1.id,
+            amount=Decimal("-100.00"),
+            txn_date=date(2024, 5, 1),
+            payment_channel="transfer",
+        )
+        await make_transaction(
+            acct2.id,
+            amount=Decimal("100.00"),
+            txn_date=date(2024, 5, 2),
+            payment_channel="transfer",
+        )
+        r = await client.post("/transfers/rematch")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pairs_linked"] == 1

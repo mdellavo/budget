@@ -65,4 +65,5 @@ export const handlers = [
   http.get("/api/categories/summary", () => HttpResponse.json(null, { status: 502 })),
   http.get("/api/recurring/summary", () => HttpResponse.json(null, { status: 502 })),
   http.get("/api/category-trends/summary", () => HttpResponse.json(null, { status: 502 })),
+  http.post("/api/transfers/rematch", () => HttpResponse.json({ pairs_linked: 0 })),
 ];

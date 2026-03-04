@@ -102,10 +102,10 @@ export default function MonthlyPage() {
   const years = Object.keys(byYear).sort((a, b) => Number(b) - Number(a));
 
   return (
-    <div className="flex h-full min-h-screen">
+    <div className="flex flex-col md:flex-row min-h-screen">
       {/* Month list */}
-      <aside className="w-52 shrink-0 border-r border-gray-200 bg-white overflow-y-auto">
-        <div className="px-4 py-5 border-b border-gray-200">
+      <aside className="w-full md:w-52 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-white md:overflow-y-auto">
+        <div className="hidden md:flex px-4 py-5 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Monthly</h2>
         </div>
         {loadingMonths ? (
@@ -113,45 +113,73 @@ export default function MonthlyPage() {
         ) : months.length === 0 ? (
           <p className="px-4 py-4 text-sm text-gray-500">No data yet.</p>
         ) : (
-          <div className="px-2 py-3 space-y-4">
-            {years.map((year) => (
-              <div key={year}>
-                <p className="px-2 mb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                  {year}
-                </p>
-                <ul className="space-y-0.5">
-                  {byYear[year].map((ym) => {
-                    const [, month] = ym.split("-");
-                    const label = new Date(Number(year), Number(month) - 1, 1).toLocaleString(
-                      "en-US",
-                      { month: "long" }
-                    );
-                    const isSelected = ym === selectedMonth;
-                    return (
-                      <li key={ym}>
-                        <button
-                          onClick={() => setSearchParams({ month: ym })}
-                          className={
-                            "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors " +
-                            (isSelected
-                              ? "bg-indigo-50 text-indigo-700 font-medium"
-                              : "text-gray-700 hover:bg-gray-100")
-                          }
-                        >
-                          {label}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
+          <>
+            {/* Mobile: horizontal scroll strip */}
+            <div className="flex overflow-x-auto gap-1 p-2 md:hidden">
+              {months.map((ym) => {
+                const [year, month] = ym.split("-");
+                const label = new Date(Number(year), Number(month) - 1, 1).toLocaleString("en-US", {
+                  month: "short",
+                  year: "numeric",
+                });
+                const isSelected = ym === selectedMonth;
+                return (
+                  <button
+                    key={ym}
+                    onClick={() => setSearchParams({ month: ym })}
+                    className={
+                      "whitespace-nowrap px-3 py-1.5 rounded-full text-sm transition-colors shrink-0 " +
+                      (isSelected
+                        ? "bg-indigo-600 text-white font-medium"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200")
+                    }
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Desktop: grouped vertical list */}
+            <div className="hidden md:block px-2 py-3 space-y-4">
+              {years.map((year) => (
+                <div key={year}>
+                  <p className="px-2 mb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    {year}
+                  </p>
+                  <ul className="space-y-0.5">
+                    {byYear[year].map((ym) => {
+                      const [, month] = ym.split("-");
+                      const label = new Date(Number(year), Number(month) - 1, 1).toLocaleString(
+                        "en-US",
+                        { month: "long" }
+                      );
+                      const isSelected = ym === selectedMonth;
+                      return (
+                        <li key={ym}>
+                          <button
+                            onClick={() => setSearchParams({ month: ym })}
+                            className={
+                              "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors " +
+                              (isSelected
+                                ? "bg-indigo-50 text-indigo-700 font-medium"
+                                : "text-gray-700 hover:bg-gray-100")
+                            }
+                          >
+                            {label}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </aside>
 
       {/* Report panel */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8">
         {error && (
           <div className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
@@ -192,7 +220,7 @@ export default function MonthlyPage() {
                   </Link>
                 </div>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <p className="text-xs text-gray-500 mb-1">Income</p>
                   <p className="text-lg font-semibold text-green-700">

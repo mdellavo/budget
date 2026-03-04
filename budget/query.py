@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import Row, and_, case, delete, func, or_, select, text, update
@@ -1651,6 +1651,55 @@ class TransactionQueries:
             groups.setdefault(key, []).append(tx)
 
         return list(groups.values())
+
+    async def match_transfers(self) -> int:
+        """Auto-link paired transfer transactions. Returns number of pairs linked."""
+        # Fetch all unlinked transfer-channel transactions for the user
+        stmt = select(Transaction).where(
+            Transaction.payment_channel == "transfer",
+            Transaction.linked_transaction_id.is_(None),
+        )
+        if self.user_id is not None:
+            stmt = stmt.where(Transaction.user_id == self.user_id)
+        stmt = stmt.order_by(Transaction.date.asc(), Transaction.id.asc())
+        rows = (await self.db.execute(stmt)).scalars().all()
+
+        # Group by absolute amount
+        by_amount: dict[str, list[Transaction]] = {}
+        for tx in rows:
+            key = str(abs(tx.amount))
+            by_amount.setdefault(key, []).append(tx)
+
+        pairs_linked = 0
+        for txs in by_amount.values():
+            debits = [t for t in txs if t.amount < 0]
+            credits = [t for t in txs if t.amount > 0]
+            used_credits: set[int] = set()
+
+            for debit in debits:
+                if debit.linked_transaction_id is not None:
+                    continue
+                best: Transaction | None = None
+                best_delta = timedelta(days=999)
+                for credit in credits:
+                    if credit.id in used_credits:
+                        continue
+                    if credit.linked_transaction_id is not None:
+                        continue
+                    if credit.account_id == debit.account_id:
+                        continue
+                    delta = abs(credit.date - debit.date)
+                    if delta <= timedelta(days=5) and delta < best_delta:
+                        best = credit
+                        best_delta = delta
+
+                if best is not None:
+                    debit.linked_transaction_id = best.id
+                    best.linked_transaction_id = debit.id
+                    used_credits.add(best.id)
+                    pairs_linked += 1
+
+        return pairs_linked
 
 
 class BudgetQueries:

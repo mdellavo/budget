@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -19,8 +20,11 @@ import BudgetPage from "./pages/BudgetPage";
 import HelpPage from "./pages/HelpPage";
 import DuplicatesPage from "./pages/DuplicatesPage";
 import TagsPage from "./pages/TagsPage";
+import TransfersPage from "./pages/TransfersPage";
 
 export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -31,8 +35,37 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <div className="flex min-h-screen bg-gray-50">
-                  <Sidebar />
-                  <main className="flex-1 overflow-y-auto">
+                  {sidebarOpen && (
+                    <div
+                      className="fixed inset-0 z-20 bg-black/40 md:hidden"
+                      onClick={() => setSidebarOpen(false)}
+                    />
+                  )}
+                  <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+                  <main className="flex-1 min-w-0 overflow-y-auto">
+                    <header className="md:hidden sticky top-0 z-10 flex items-center gap-3 h-14 px-4 bg-gray-900 text-white shrink-0">
+                      <button
+                        onClick={() => setSidebarOpen(true)}
+                        aria-label="Open menu"
+                        className="p-1 rounded hover:bg-gray-700"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-6 w-6"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M4 6h16M4 12h16M4 18h16"
+                          />
+                        </svg>
+                      </button>
+                      <span className="text-base font-semibold">Budget</span>
+                    </header>
                     <Routes>
                       <Route path="/" element={<Navigate to="/overview" replace />} />
                       <Route path="/overview" element={<OverviewPage />} />
@@ -50,6 +83,7 @@ export default function App() {
                       <Route path="/budgets" element={<BudgetPage />} />
                       <Route path="/duplicates" element={<DuplicatesPage />} />
                       <Route path="/tags" element={<TagsPage />} />
+                      <Route path="/transfers" element={<TransfersPage />} />
                       <Route path="/help" element={<HelpPage />} />
                     </Routes>
                   </main>

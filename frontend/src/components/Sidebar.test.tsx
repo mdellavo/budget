@@ -11,7 +11,7 @@ function renderSidebar(initialPath = "/") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <AuthProvider>
-        <Sidebar />
+        <Sidebar isOpen={false} onClose={() => {}} />
       </AuthProvider>
     </MemoryRouter>
   );

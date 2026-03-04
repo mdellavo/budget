@@ -85,10 +85,10 @@ export default function YearlyPage() {
   }, [selectedYear]);
 
   return (
-    <div className="flex h-full min-h-screen">
+    <div className="flex flex-col md:flex-row min-h-screen">
       {/* Year list */}
-      <aside className="w-40 shrink-0 border-r border-gray-200 bg-white overflow-y-auto">
-        <div className="px-4 py-5 border-b border-gray-200">
+      <aside className="w-full md:w-40 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-white md:overflow-y-auto">
+        <div className="hidden md:flex px-4 py-5 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Yearly</h2>
         </div>
         {loadingYears ? (
@@ -96,31 +96,54 @@ export default function YearlyPage() {
         ) : years.length === 0 ? (
           <p className="px-4 py-4 text-sm text-gray-500">No data yet.</p>
         ) : (
-          <ul className="px-2 py-3 space-y-0.5">
-            {years.map((year) => {
-              const isSelected = year === selectedYear;
-              return (
-                <li key={year}>
+          <>
+            {/* Mobile: horizontal scroll strip */}
+            <div className="flex overflow-x-auto gap-1 p-2 md:hidden">
+              {years.map((year) => {
+                const isSelected = year === selectedYear;
+                return (
                   <button
+                    key={year}
                     onClick={() => setSearchParams({ year })}
                     className={
-                      "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors " +
+                      "whitespace-nowrap px-3 py-1.5 rounded-full text-sm transition-colors shrink-0 " +
                       (isSelected
-                        ? "bg-indigo-50 text-indigo-700 font-medium"
-                        : "text-gray-700 hover:bg-gray-100")
+                        ? "bg-indigo-600 text-white font-medium"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200")
                     }
                   >
                     {year}
                   </button>
-                </li>
-              );
-            })}
-          </ul>
+                );
+              })}
+            </div>
+            {/* Desktop: vertical list */}
+            <ul className="hidden md:block px-2 py-3 space-y-0.5">
+              {years.map((year) => {
+                const isSelected = year === selectedYear;
+                return (
+                  <li key={year}>
+                    <button
+                      onClick={() => setSearchParams({ year })}
+                      className={
+                        "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors " +
+                        (isSelected
+                          ? "bg-indigo-50 text-indigo-700 font-medium"
+                          : "text-gray-700 hover:bg-gray-100")
+                      }
+                    >
+                      {year}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </aside>
 
       {/* Report panel */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8">
         {error && (
           <div className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
@@ -161,7 +184,7 @@ export default function YearlyPage() {
                   </Link>
                 </div>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <p className="text-xs text-gray-500 mb-1">Income</p>
                   <p className="text-lg font-semibold text-green-700">

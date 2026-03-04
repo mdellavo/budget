@@ -4,6 +4,7 @@ uvicorn
 anthropic
 sqlalchemy
 aiosqlite
+asyncpg
 python-jose[cryptography]
 bcrypt
 google-auth

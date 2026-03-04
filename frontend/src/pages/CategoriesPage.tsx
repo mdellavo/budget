@@ -471,7 +471,7 @@ export default function CategoriesPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Categories</h1>
         <HelpIcon section="categories" />
@@ -505,7 +505,7 @@ export default function CategoriesPage() {
           ))}
         </div>
         <div className="flex gap-3 flex-wrap items-end">
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Date From</label>
             <input
               type="date"
@@ -517,7 +517,7 @@ export default function CategoriesPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Date To</label>
             <input
               type="date"
@@ -529,7 +529,7 @@ export default function CategoriesPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Category</label>
             <input
               type="text"
@@ -539,7 +539,7 @@ export default function CategoriesPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Subcategory</label>
             <input
               type="text"
@@ -549,7 +549,7 @@ export default function CategoriesPage() {
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-full sm:w-auto">
             <label className="text-xs text-gray-500 font-medium">Sort subcategories by</label>
             <select
               value={subSortBy}

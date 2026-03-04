@@ -81,7 +81,7 @@ export default function MerchantMergePage() {
   const allResolved = groups.length > 0 && resolvedCount === groups.length;
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-semibold text-gray-900">Merge Duplicate Merchants</h1>
         <HelpIcon section="merchants" />

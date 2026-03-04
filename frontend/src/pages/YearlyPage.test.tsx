@@ -53,9 +53,10 @@ describe("YearlyPage", () => {
   it("renders year list in sidebar", async () => {
     server.use(http.get("/api/yearly", () => HttpResponse.json(YEARS_RESPONSE)));
     renderPage();
-    await screen.findByRole("button", { name: "2025" });
-    expect(screen.getByRole("button", { name: "2024" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "2023" })).toBeInTheDocument();
+    // Both mobile-strip and desktop-list buttons render in JSDOM; check at least one exists.
+    await screen.findAllByRole("button", { name: "2025" });
+    expect(screen.getAllByRole("button", { name: "2024" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "2023" }).length).toBeGreaterThan(0);
   });
 
   it("shows 'No data yet.' when years list is empty", async () => {
@@ -86,8 +87,8 @@ describe("YearlyPage", () => {
       http.get("/api/yearly/:year", () => HttpResponse.json(YEARLY_REPORT))
     );
     renderPage();
-    await screen.findByRole("button", { name: "2024" });
-    await user.click(screen.getByRole("button", { name: "2024" }));
+    const buttons = await screen.findAllByRole("button", { name: "2024" });
+    await user.click(buttons[0]);
     await screen.findByText("Annual report");
     expect(screen.getByText("150 transactions")).toBeInTheDocument();
   });

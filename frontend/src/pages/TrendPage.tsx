@@ -131,7 +131,7 @@ export default function TrendPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-5xl space-y-6">
         <div>
           <div className="flex items-center gap-2">

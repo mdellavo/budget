@@ -214,6 +214,9 @@ class Transaction(Base):
     payment_channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # values: 'purchase' | 'refund' | 'fee' | 'interest' | 'p2p' | 'atm' | 'transfer' | 'payroll'
     fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    linked_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "fingerprint"),)
