@@ -512,7 +512,41 @@ function EditTransactionModal({ tx, onClose, onSaved }: EditTransactionModalProp
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-gray-200">
+          <button
+            type="button"
+            onClick={async () => {
+              setSaving(true);
+              setError(null);
+              try {
+                const body: TransactionUpdateBody = {
+                  description: form.description,
+                  merchant_name: form.merchant.trim() || null,
+                  category: form.category.trim() || null,
+                  subcategory: form.subcategory.trim() || null,
+                  notes: form.notes.trim() || null,
+                  card_number: form.card_number.trim() || null,
+                  tags,
+                  is_excluded: !tx.is_excluded,
+                };
+                const updated = await updateTransaction(tx.id, body);
+                onSaved(updated);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Failed to save");
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={saving}
+            className={`px-3 py-2 text-sm font-medium rounded border disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-gray-400 ${
+              tx.is_excluded
+                ? "text-green-700 border-green-300 hover:bg-green-50"
+                : "text-gray-600 border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            {tx.is_excluded ? "Include" : "Exclude"}
+          </button>
+          <div className="flex-1" />
           <button
             type="button"
             onClick={onClose}
@@ -1662,6 +1696,11 @@ export default function TransactionsPage() {
                       {row.is_recurring && (
                         <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">
                           recurring
+                        </span>
+                      )}
+                      {row.is_excluded && (
+                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+                          excluded
                         </span>
                       )}
                       {row.tags && row.tags.length > 0 && (

@@ -136,6 +136,66 @@ describe("CategoriesPage", () => {
     expect(categoryInput).toHaveValue("");
   });
 
+  it("shows preset buttons with 1 month active by default", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "1 month" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "3 months" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "6 months" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 year" })).toBeInTheDocument();
+    // 1 month should be active (indigo style)
+    expect(screen.getByRole("button", { name: "1 month" }).className).toContain("bg-indigo-600");
+    expect(screen.getByRole("button", { name: "3 months" }).className).not.toContain(
+      "bg-indigo-600"
+    );
+  });
+
+  it("clicking a preset auto-applies and sends date params", async () => {
+    const user = userEvent.setup();
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/categories", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ items: [] });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "3 months" }));
+
+    await waitFor(() => {
+      const params = new URL(capturedUrl).searchParams;
+      expect(params.get("date_from")).toBeTruthy();
+      expect(params.get("date_to")).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "3 months" }).className).toContain("bg-indigo-600");
+    expect(screen.getByRole("button", { name: "1 month" }).className).not.toContain(
+      "bg-indigo-600"
+    );
+  });
+
+  it("manually changing a date clears the active preset", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    const dateFromInput = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/)[0];
+    await user.clear(dateFromInput);
+    await user.type(dateFromInput, "2024-01-01");
+    expect(screen.getByRole("button", { name: "1 month" }).className).not.toContain(
+      "bg-indigo-600"
+    );
+  });
+
+  it("clicking Clear resets to 1 month preset", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "1 year" }));
+    await user.click(screen.getByRole("button", { name: /clear/i }));
+    expect(screen.getByRole("button", { name: "1 month" }).className).toContain("bg-indigo-600");
+  });
+
   it("sort dropdown changes subcategory sort order", async () => {
     const user = userEvent.setup();
     server.use(http.get("/api/categories", () => HttpResponse.json({ items: CATEGORY_ROWS })));

@@ -49,6 +49,7 @@ export const handlers = [
   http.patch("/api/categories/:id", () => HttpResponse.json({ id: 1, classification: null })),
   http.patch("/api/subcategories/:id", () => HttpResponse.json({ id: 1, classification: null })),
   http.get("/api/tags", () => HttpResponse.json({ items: [] })),
+  http.get("/api/transactions/duplicates", () => HttpResponse.json({ groups: [] })),
   http.get("/api/yearly", () => HttpResponse.json({ years: [] })),
   http.get("/api/yearly/:year", () =>
     HttpResponse.json({

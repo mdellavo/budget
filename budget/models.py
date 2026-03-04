@@ -70,6 +70,7 @@ class CsvImport(Base):
     imported_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     row_count: Mapped[int]
     enriched_rows: Mapped[int] = mapped_column(default=0, server_default="0")
+    skipped_duplicates: Mapped[int] = mapped_column(default=0, server_default="0")
     status: Mapped[str] = mapped_column(
         String(20), default="in-progress", server_default="'in-progress'"
     )
@@ -203,13 +204,19 @@ class Transaction(Base):
     is_recurring: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"
     )
+    is_excluded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     is_refund: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     is_international: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"
     )
     payment_channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # values: 'purchase' | 'refund' | 'fee' | 'interest' | 'p2p' | 'atm' | 'transfer' | 'payroll'
+    fingerprint: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint"),)
 
     user: Mapped["User"] = relationship(back_populates="transactions")
     account: Mapped[Account] = relationship(back_populates="transactions")

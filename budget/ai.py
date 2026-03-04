@@ -523,6 +523,13 @@ for a specific time period and write a concise summary to help the user understa
 their finances. Be specific, reference actual numbers, and keep recommendations \
 actionable. Avoid generic platitudes.
 
+If the data includes a "period_meta" field with "is_complete": false, the period \
+is still in progress. In that case:
+- Do NOT raise concerns about income or expenses appearing low — data is partial.
+- Mention in the narrative that only part of the period has elapsed \
+  (e.g. "With X of Y days elapsed…").
+- Keep insights and recommendations proportionate to the data available.
+
 Use light markdown formatting in your response:
 - Use **bold** to highlight key figures, dollar amounts, and important terms
 - Use *italics* sparingly for emphasis

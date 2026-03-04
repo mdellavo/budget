@@ -7,15 +7,6 @@ const OVERVIEW_NAV = { to: "/overview", label: "Overview", icon: "📊" };
 
 const NAV_GROUPS = [
   {
-    label: "Reports",
-    items: [
-      { to: "/monthly", label: "Monthly", icon: "📅" },
-      { to: "/yearly", label: "Yearly", icon: "📆" },
-      { to: "/trends", label: "Trends", icon: "📈" },
-      { to: "/categories", label: "Categories", icon: "🏷️" },
-    ],
-  },
-  {
     label: "Transactions",
     items: [
       { to: "/transactions", label: "Transactions", icon: "↕" },
@@ -24,12 +15,23 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Reports",
+    items: [
+      { to: "/monthly", label: "Monthly", icon: "📅" },
+      { to: "/yearly", label: "Yearly", icon: "📆" },
+      { to: "/trends", label: "Trends", icon: "📈" },
+      { to: "/categories", label: "Categories", icon: "🏷️" },
+      { to: "/merchants", label: "Merchants", icon: "🏪" },
+      { to: "/tags", label: "Tags", icon: "🔖" },
+    ],
+  },
+  {
     label: "Manage",
     items: [
       { to: "/accounts", label: "Accounts", icon: "🏦" },
-      { to: "/merchants", label: "Merchants", icon: "🏪" },
       { to: "/cardholders", label: "Card Holders", icon: "💳" },
       { to: "/imports", label: "Imports", icon: "📋" },
+      { to: "/duplicates", label: "Duplicates", icon: "⚠️" },
     ],
   },
 ];

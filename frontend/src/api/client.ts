@@ -17,6 +17,7 @@ import type {
   OverviewData,
   RecurringData,
   ReportSummary,
+  TagItem,
   TransactionItem,
   TransactionsResponse,
   WizardResponse,
@@ -452,6 +453,7 @@ export interface TransactionUpdateBody {
   notes: string | null;
   card_number?: string | null;
   tags?: string[];
+  is_excluded?: boolean;
 }
 
 export async function updateTransaction(
@@ -515,6 +517,12 @@ export async function mergeMerchants(body: MerchantMergeBody): Promise<MergedMer
 
 export interface ReEnrichResponse {
   items: TransactionItem[];
+}
+
+export async function getDuplicateTransactions(): Promise<{ groups: TransactionItem[][] }> {
+  return handleResponse<{ groups: TransactionItem[][] }>(
+    await fetch(`${BASE}/transactions/duplicates`, { headers: authHeaders() })
+  );
 }
 
 export async function reEnrichTransactions(ids: number[]): Promise<ReEnrichResponse> {
@@ -695,6 +703,26 @@ export async function createBudgetsBatch(items: BatchBudgetItem[]): Promise<Batc
   );
 }
 
+export interface TagFilters {
+  name?: string;
+  sort_by?: "name" | "transaction_count" | "total_amount";
+  sort_dir?: "asc" | "desc";
+}
+
+export async function listTags(filters: TagFilters = {}): Promise<{ items: TagItem[] }> {
+  const params = new URLSearchParams();
+  for (const [key, val] of Object.entries(filters)) {
+    if (val !== undefined && val !== "") params.set(key, String(val));
+  }
+  const qs = params.toString();
+  return handleResponse<{ items: TagItem[] }>(
+    await fetch(`${BASE}/tags${qs ? `?${qs}` : ""}`, { headers: authHeaders() })
+  );
+}
+
 export async function fetchTags(): Promise<{ items: string[] }> {
-  return handleResponse(await fetch(`${BASE}/tags`, { headers: authHeaders() }));
+  const res = await handleResponse<{ items: TagItem[] }>(
+    await fetch(`${BASE}/tags`, { headers: authHeaders() })
+  );
+  return { items: res.items.map((t) => t.name) };
 }

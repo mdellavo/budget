@@ -4,7 +4,7 @@ import hashlib
 import io
 import logging
 import os
-from calendar import monthrange
+from calendar import isleap, monthrange
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -1086,6 +1086,18 @@ async def get_monthly_summary(
             for b in budgets
         ]
 
+    today = date.today()
+    year_i, mon_i = map(int, month.split("-"))
+    days_in_month = monthrange(year_i, mon_i)[1]
+    month_end = date(year_i, mon_i, days_in_month)
+    is_complete = today > month_end
+    days_elapsed = min((today - date(year_i, mon_i, 1)).days + 1, days_in_month)
+    report["period_meta"] = {
+        "is_complete": is_complete,
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+    }
+
     try:
         result = await asyncio.to_thread(
             report_summarizer.summarize, _format_month_label(month), report
@@ -1093,8 +1105,9 @@ async def get_monthly_summary(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
 
-    await cache.set("monthly", month, result)
-    await db.commit()
+    if is_complete:
+        await cache.set("monthly", month, result)
+        await db.commit()
     return result
 
 
@@ -1173,13 +1186,25 @@ async def get_yearly_summary(
         if ms["transaction_count"] > 0
     ]
 
+    today = date.today()
+    year_i = int(year)
+    is_complete = today > date(year_i, 12, 31)
+    days_in_year = 366 if isleap(year_i) else 365
+    days_elapsed = min((today - date(year_i, 1, 1)).days + 1, days_in_year)
+    report["period_meta"] = {
+        "is_complete": is_complete,
+        "days_elapsed": days_elapsed,
+        "days_in_year": days_in_year,
+    }
+
     try:
         result = await asyncio.to_thread(report_summarizer.summarize, year, report)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
 
-    await cache.set("yearly", year, result)
-    await db.commit()
+    if is_complete:
+        await cache.set("yearly", year, result)
+        await db.commit()
     return result
 
 
@@ -1248,6 +1273,15 @@ async def get_overview_summary(
     else:
         period_label = "All Time"
 
+    today = date.today()
+    try:
+        end_date = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        end_date = None
+    overview_is_complete = end_date is None or end_date < today
+    if not overview_is_complete:
+        report["period_meta"] = {"is_complete": False, "date_to": date_to}
+
     try:
         result = await asyncio.to_thread(
             report_summarizer.summarize, period_label, report
@@ -1255,8 +1289,9 @@ async def get_overview_summary(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI summarization failed: {e}")
 
-    await cache.set("overview", period_key, result)
-    await db.commit()
+    if overview_is_complete:
+        await cache.set("overview", period_key, result)
+        await db.commit()
     return result
 
 
@@ -2446,12 +2481,25 @@ async def re_enrich_transactions(
 
 @app.get("/tags")
 async def list_tags(
+    name: str | None = Query(None),
+    sort_by: str = Query("name", pattern="^(name|transaction_count|total_amount)$"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    txq = TransactionQueries(db, user_id=current_user.id)
-    tags = await txq.list_all_tags()
-    return {"items": [t.name for t in tags]}
+    rows = await TransactionQueries(db, user_id=current_user.id).list_tags_with_stats(
+        name=name, sort_by=sort_by, sort_dir=sort_dir
+    )
+    return {
+        "items": [
+            {
+                "name": r.name,
+                "transaction_count": r.transaction_count,
+                "total_amount": str(r.total_amount),
+            }
+            for r in rows
+        ]
+    }
 
 
 class ParseQueryRequest(BaseModel):

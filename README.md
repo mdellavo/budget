@@ -17,6 +17,7 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
 - Abort an in-progress enrichment job at any time
 - Re-enrich an existing import to re-classify transactions with fresh AI output
 - Import history with per-import status, row counts, and detected column mapping
+- **Smart deduplication** — each transaction is fingerprinted by (account, date, amount, description); re-importing an overlapping CSV skips already-present rows and preserves their enrichment data
 
 ### Transactions
 - Paginated transaction list with sort and filter (date, amount, merchant, category, account, cardholder, tag, recurring, uncategorized)
@@ -29,6 +30,11 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
   - Find-or-create: new merchant and category names are created automatically on save
 - Bulk re-enrich: select multiple rows and send them back to Claude for fresh categorization
 - Merchant logos shown next to merchant names (via logo.dev), falling back to an initial-letter avatar
+- **Exclude transactions** — mark any transaction as excluded from analytics; excluded rows remain visible in the list (with an "excluded" badge) and can be re-included at any time via the edit modal
+
+### Duplicate Report
+- **Duplicate Transactions page** — surfaces groups of transactions that share the same account, date, and amount; each group is shown as a card with all matching rows
+- Exclude individual rows directly from the Duplicates page to clean up accidental re-imports without deleting data
 
 ### Overview
 - Stat cards: total transactions, income, expenses, net change, and savings rate
@@ -101,6 +107,12 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
 - Merchant list with logo, name, location, transaction count, and total spend
 - Edit a merchant's name, location, and website from the detail modal
 - **Merge duplicates** — Claude scans all merchants and groups likely duplicates (e.g. "Starbucks" and "STARBUCKS #0423"); review each group, set a canonical name, and merge in one click
+
+### Tags
+- Flexible labels attached to transactions — assigned automatically by Claude during enrichment or added manually via the edit modal
+- Tags page lists every tag with its transaction count and total spend
+- Filter by name; sort by tag name, transaction count, or total amount
+- Click a tag name to jump to the Transactions page pre-filtered to that tag
 
 ### Card Holders
 - Tracks individual cardholders on shared accounts by card number (last 4 digits)

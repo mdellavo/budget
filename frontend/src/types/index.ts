@@ -32,6 +32,7 @@ export interface TransactionItem {
   subcategory: string | null;
   notes: string | null;
   is_recurring: boolean;
+  is_excluded: boolean;
   is_refund: boolean;
   is_international: boolean;
   payment_channel:
@@ -295,6 +296,12 @@ export interface WizardResponse {
   items: WizardSuggestion[];
   avg_monthly_income: string;
   months_analyzed: number;
+}
+
+export interface TagItem {
+  name: string;
+  transaction_count: number;
+  total_amount: string;
 }
 
 export interface OverviewData {

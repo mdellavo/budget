@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AiSummaryCard from "../components/AiSummaryCard";
+import HelpIcon from "../components/HelpIcon";
 import SpendingChart from "../components/SpendingChart";
 import { listYears, getYearlyReport, getYearlyReportSummary } from "../api/client";
 import { formatCurrency, amountColor } from "../lib/format";
@@ -135,7 +136,10 @@ export default function YearlyPage() {
         {report && (
           <div className="max-w-4xl space-y-8">
             <div className="mb-1">
-              <h1 className="text-2xl font-bold text-gray-900">{report.year}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-gray-900">{report.year}</h1>
+                <HelpIcon section="yearly" />
+              </div>
               <p className="text-sm text-gray-500 mt-1">Annual report</p>
             </div>
 

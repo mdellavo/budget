@@ -70,6 +70,16 @@ export default function HelpPage() {
               Importing Transactions
             </a>
           </li>
+          <li>
+            <a href="#duplicates" className="hover:underline">
+              Duplicate Transactions
+            </a>
+          </li>
+          <li>
+            <a href="#tags" className="hover:underline">
+              Tags
+            </a>
+          </li>
         </ol>
       </nav>
 
@@ -242,6 +252,12 @@ export default function HelpPage() {
               </li>
               <li>
                 New merchant and category names are created automatically on save (find-or-create).
+              </li>
+              <li>
+                <strong>Exclude / Include</strong> — the edit modal has an <em>Exclude</em> button
+                that removes the transaction from all income and expense calculations (monthly,
+                yearly, overview). Excluded rows are still visible in the list with an
+                &ldquo;excluded&rdquo; badge. Click <em>Include</em> in the modal to reverse it.
               </li>
             </ul>
             <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Bulk actions</h3>
@@ -556,8 +572,10 @@ export default function HelpPage() {
                 manual column mapping needed.
               </li>
               <li>
-                Transactions are deduplicated against existing data for the same account, so
-                re-importing an overlapping CSV is safe.
+                Each transaction is fingerprinted by its account, date, amount, and description.
+                Re-importing an overlapping CSV skips already-present rows and preserves their
+                enrichment data. Two genuine identical purchases on the same day are kept
+                separately.
               </li>
             </ul>
             <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Background enrichment</h3>
@@ -566,7 +584,11 @@ export default function HelpPage() {
                 After upload, Claude processes transactions in batches to assign merchants,
                 categories, subcategories, and recurring flags.
               </li>
-              <li>A progress bar shows how many rows have been enriched out of the total.</li>
+              <li>
+                A progress bar shows how many rows have been processed out of the total. Skipped
+                duplicate rows count toward progress and are reported separately once the import
+                completes.
+              </li>
               <li>
                 <strong>Abort</strong> — cancel an in-progress enrichment job; already-enriched rows
                 are kept.
@@ -583,6 +605,81 @@ export default function HelpPage() {
                 re-classify its transactions (e.g. after updating category or merchant data).
               </li>
               <li>Click the transaction count to view that import's transactions.</li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Tags */}
+        <section id="tags">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Tags</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              Tags are labels attached to individual transactions. They provide a flexible way to
+              group and find transactions that don&apos;t fit neatly into a single category — for
+              example, tagging expenses that belong to a specific trip, project, or event.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">How tags are assigned</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                <strong>AI enrichment</strong> — Claude suggests tags automatically when
+                transactions are imported, based on the merchant and description.
+              </li>
+              <li>
+                <strong>Manual tagging</strong> — open any transaction&apos;s edit modal from the
+                Transactions page and add or remove tags in the Tags field. Multiple tags can be
+                applied to a single transaction.
+              </li>
+            </ul>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Tags page</h3>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Lists every tag with its transaction count and total amount across all tagged
+                transactions.
+              </li>
+              <li>
+                Use the <strong>Name</strong> filter to search for a specific tag by name.
+              </li>
+              <li>
+                Click any column header to sort by that column. Clicking the same header again
+                toggles between ascending and descending order.
+              </li>
+              <li>
+                Click a tag name to navigate to the Transactions page pre-filtered to show only
+                transactions with that tag.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Duplicates */}
+        <section id="duplicates">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Duplicate Transactions</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              The Duplicates page surfaces transaction groups that share the same account, date, and
+              amount. This can happen when the same transaction appears in two overlapping CSV
+              exports, or when a bank records a single charge twice.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Each duplicate group is shown as a card with the shared date, amount, and account in
+                the header, and each matching transaction as a row below.
+              </li>
+              <li>
+                Click <strong>Exclude</strong> on any row to remove it from analytics. The row
+                disappears from the Duplicates page; if only one transaction remains in the group,
+                the card collapses automatically.
+              </li>
+              <li>
+                Excluded transactions are still visible in the Transactions list with an
+                &ldquo;excluded&rdquo; badge and can be re-included from the edit modal at any time.
+              </li>
+              <li>
+                Note: transactions are deduplicated by fingerprint when imported, so truly identical
+                rows (same account, date, amount, and description) in the same CSV are only imported
+                once. The Duplicates page catches cases where the description differs slightly or
+                where the same transaction appears in two different CSV files.
+              </li>
             </ul>
           </div>
         </section>

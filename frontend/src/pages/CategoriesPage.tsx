@@ -38,6 +38,27 @@ function formatAmount(amount: string | number): { text: string; positive: boolea
 const EMPTY_FILTERS = { date_from: "", date_to: "", category: "", subcategory: "" };
 type FormFilters = typeof EMPTY_FILTERS;
 
+type Preset = "1m" | "3m" | "6m" | "1y";
+const PRESETS: { label: string; value: Preset }[] = [
+  { label: "1 month", value: "1m" },
+  { label: "3 months", value: "3m" },
+  { label: "6 months", value: "6m" },
+  { label: "1 year", value: "1y" },
+];
+
+function presetDates(preset: Preset): { date_from: string; date_to: string } {
+  const today = new Date();
+  const to = today.toISOString().slice(0, 10);
+  const from = new Date(today);
+  if (preset === "1m") from.setMonth(from.getMonth() - 1);
+  else if (preset === "3m") from.setMonth(from.getMonth() - 3);
+  else if (preset === "6m") from.setMonth(from.getMonth() - 6);
+  else from.setFullYear(from.getFullYear() - 1);
+  return { date_from: from.toISOString().slice(0, 10), date_to: to };
+}
+
+const DEFAULT_PRESET: Preset = "1m";
+
 const PALETTE = [
   "#3b82f6",
   "#f97316",
@@ -288,8 +309,15 @@ function CategoryCard({
 // ── CategoriesPage ─────────────────────────────────────────────────────────────
 
 export default function CategoriesPage() {
-  const [filters, setFilters] = useState<FormFilters>(EMPTY_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState<FormFilters>(EMPTY_FILTERS);
+  const [activePreset, setActivePreset] = useState<Preset | null>(DEFAULT_PRESET);
+  const [filters, setFilters] = useState<FormFilters>(() => ({
+    ...EMPTY_FILTERS,
+    ...presetDates(DEFAULT_PRESET),
+  }));
+  const [appliedFilters, setAppliedFilters] = useState<FormFilters>(() => ({
+    ...EMPTY_FILTERS,
+    ...presetDates(DEFAULT_PRESET),
+  }));
   const [subSortBy, setSubSortBy] = useState<SubSortKey>("total_amount");
   const [rows, setRows] = useState<CategoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -421,14 +449,25 @@ export default function CategoriesPage() {
     });
   }, [rows, classificationOverrides]);
 
+  function handlePreset(preset: Preset) {
+    const dates = presetDates(preset);
+    const next = { ...EMPTY_FILTERS, ...dates };
+    setActivePreset(preset);
+    setFilters(next);
+    setAppliedFilters(next);
+  }
+
   function handleApply(e: React.FormEvent) {
     e.preventDefault();
     setAppliedFilters(filters);
   }
 
   function handleClear() {
-    setFilters(EMPTY_FILTERS);
-    setAppliedFilters(EMPTY_FILTERS);
+    const dates = presetDates(DEFAULT_PRESET);
+    const next = { ...EMPTY_FILTERS, ...dates };
+    setActivePreset(DEFAULT_PRESET);
+    setFilters(next);
+    setAppliedFilters(next);
   }
 
   return (
@@ -447,13 +486,34 @@ export default function CategoriesPage() {
         onSubmit={handleApply}
         className="mb-6 bg-white border border-gray-200 rounded-md shadow-sm p-4"
       >
+        {/* Preset buttons */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs text-gray-500 font-medium">Range:</span>
+          {PRESETS.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => handlePreset(p.value)}
+              className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                activePreset === p.value
+                  ? "bg-indigo-600 border-indigo-600 text-white"
+                  : "border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-3 flex-wrap items-end">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 font-medium">Date From</label>
             <input
               type="date"
               value={filters.date_from}
-              onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
+              onChange={(e) => {
+                setActivePreset(null);
+                setFilters((f) => ({ ...f, date_from: e.target.value }));
+              }}
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -462,7 +522,10 @@ export default function CategoriesPage() {
             <input
               type="date"
               value={filters.date_to}
-              onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
+              onChange={(e) => {
+                setActivePreset(null);
+                setFilters((f) => ({ ...f, date_to: e.target.value }));
+              }}
               className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>

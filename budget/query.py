@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, case, delete, func, or_, select, text, update
+from sqlalchemy import Row, and_, case, delete, func, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1552,6 +1552,39 @@ class TransactionQueries:
             stmt = stmt.where(Tag.user_id == self.user_id)
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def list_tags_with_stats(
+        self,
+        name: str | None = None,
+        sort_by: str = "name",
+        sort_dir: str = "asc",
+    ) -> Sequence[Row]:
+        stmt = (
+            select(
+                Tag.name,
+                func.count(transaction_tags.c.transaction_id).label(
+                    "transaction_count"
+                ),
+                func.coalesce(func.sum(Transaction.amount), 0).label("total_amount"),
+            )
+            .outerjoin(transaction_tags, Tag.id == transaction_tags.c.tag_id)
+            .outerjoin(Transaction, transaction_tags.c.transaction_id == Transaction.id)
+            .group_by(Tag.id, Tag.name)
+        )
+        if self.user_id is not None:
+            stmt = stmt.where(Tag.user_id == self.user_id)
+        if name:
+            stmt = stmt.where(Tag.name.ilike(f"%{name}%"))
+        col_map = {
+            "name": Tag.name,
+            "transaction_count": func.count(transaction_tags.c.transaction_id),
+            "total_amount": func.sum(Transaction.amount),
+        }
+        order_col = col_map.get(sort_by, Tag.name)
+        stmt = stmt.order_by(
+            order_col.desc() if sort_dir == "desc" else order_col.asc()
+        )
+        return (await self.db.execute(stmt)).all()
 
     async def find_duplicates(self) -> Sequence[Sequence[Transaction]]:
         """Return groups of non-excluded transactions sharing (account, date, amount, raw_description)."""

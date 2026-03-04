@@ -2096,6 +2096,176 @@ class TestYearly:
 
 
 # ---------------------------------------------------------------------------
+# Monthly / yearly / overview summary period_meta injection
+# ---------------------------------------------------------------------------
+
+FAKE_SUMMARY = {
+    "narrative": "Test narrative.",
+    "insights": ["An insight."],
+    "recommendations": ["A recommendation."],
+}
+
+
+class TestMonthlySummaryPeriodMeta:
+    async def test_incomplete_month_has_period_meta_false(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Current month: period_meta.is_complete should be False."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+        current_month = today.strftime("%Y-%m")
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=today)
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        r = await client.get(f"/monthly/{current_month}/summary")
+        assert r.status_code == 200
+
+        _label, report = mock_summarize.call_args.args
+        assert report["period_meta"]["is_complete"] is False
+        assert (
+            report["period_meta"]["days_elapsed"]
+            <= report["period_meta"]["days_in_month"]
+        )
+
+    async def test_past_month_has_period_meta_true(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Past month: period_meta.is_complete should be True."""
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 1, 15))
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        r = await client.get("/monthly/2024-01/summary")
+        assert r.status_code == 200
+
+        _label, report = mock_summarize.call_args.args
+        assert report["period_meta"]["is_complete"] is True
+        assert report["period_meta"]["days_in_month"] == 31
+
+    async def test_incomplete_month_not_cached(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Incomplete month summaries should not be written to cache."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+        current_month = today.strftime("%Y-%m")
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=today)
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        await client.get(f"/monthly/{current_month}/summary")
+        await client.get(f"/monthly/{current_month}/summary")
+        # Should re-generate each time since not cached
+        assert mock_summarize.call_count == 2
+
+    async def test_past_month_is_cached(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Past month summaries should be cached after the first call."""
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 1, 15))
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        await client.get("/monthly/2024-01/summary")
+        await client.get("/monthly/2024-01/summary")
+        assert mock_summarize.call_count == 1
+
+
+class TestYearlySummaryPeriodMeta:
+    async def test_incomplete_year_has_period_meta_false(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Current year: period_meta.is_complete should be False."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+        current_year = str(today.year)
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=today)
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        r = await client.get(f"/yearly/{current_year}/summary")
+        assert r.status_code == 200
+
+        _label, report = mock_summarize.call_args.args
+        assert report["period_meta"]["is_complete"] is False
+        assert (
+            report["period_meta"]["days_elapsed"]
+            <= report["period_meta"]["days_in_year"]
+        )
+
+    async def test_past_year_has_period_meta_true(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Past year: period_meta.is_complete should be True."""
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 6, 15))
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        r = await client.get("/yearly/2024/summary")
+        assert r.status_code == 200
+
+        _label, report = mock_summarize.call_args.args
+        assert report["period_meta"]["is_complete"] is True
+        assert report["period_meta"]["days_in_year"] == 366  # 2024 is a leap year
+
+    async def test_incomplete_year_not_cached(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Incomplete year summaries should not be written to cache."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+        current_year = str(today.year)
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=today)
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        await client.get(f"/yearly/{current_year}/summary")
+        await client.get(f"/yearly/{current_year}/summary")
+        assert mock_summarize.call_count == 2
+
+    async def test_past_year_is_cached(
+        self, client, make_account, make_transaction, mocker
+    ):
+        """Past year summaries should be cached after the first call."""
+        acct = await make_account()
+        await make_transaction(acct.id, txn_date=date(2024, 6, 15))
+
+        mock_summarize = mocker.patch(
+            "budget.main.report_summarizer.summarize",
+            return_value=FAKE_SUMMARY,
+        )
+        await client.get("/yearly/2024/summary")
+        await client.get("/yearly/2024/summary")
+        assert mock_summarize.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Tags
 # ---------------------------------------------------------------------------
 
@@ -2105,6 +2275,83 @@ class TestTags:
         r = await client.get("/tags")
         assert r.status_code == 200
         assert r.json() == {"items": []}
+
+    async def test_list_tags_with_stats(
+        self, client, make_account, make_transaction, db_session
+    ):
+        from budget.models import Tag
+        from budget.models import transaction_tags as tt
+
+        acct = await make_account()
+        tx = await make_transaction(acct.id, amount=Decimal("-25.00"))
+
+        tag = Tag(user_id=1, name="food")
+        db_session.add(tag)
+        await db_session.flush()
+        await db_session.execute(
+            tt.insert().values(transaction_id=tx.id, tag_id=tag.id)
+        )
+        await db_session.commit()
+
+        r = await client.get("/tags")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["name"] == "food"
+        assert item["transaction_count"] == 1
+        assert float(item["total_amount"]) == -25.0
+
+    async def test_list_tags_name_filter(self, client, db_session):
+        from budget.models import Tag
+
+        db_session.add(Tag(user_id=1, name="food"))
+        db_session.add(Tag(user_id=1, name="travel"))
+        await db_session.commit()
+
+        r = await client.get("/tags", params={"name": "foo"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["name"] == "food"
+
+    async def test_list_tags_sort_by_transaction_count(
+        self, client, make_account, make_transaction, db_session
+    ):
+        from budget.models import Tag
+        from budget.models import transaction_tags as tt
+
+        acct = await make_account()
+        tx1 = await make_transaction(acct.id)
+        tx2 = await make_transaction(acct.id, description="tx2")
+
+        tag_food = Tag(user_id=1, name="food")
+        tag_travel = Tag(user_id=1, name="travel")
+        db_session.add(tag_food)
+        db_session.add(tag_travel)
+        await db_session.flush()
+
+        # food gets 2 transactions, travel gets 1
+        await db_session.execute(
+            tt.insert().values(transaction_id=tx1.id, tag_id=tag_food.id)
+        )
+        await db_session.execute(
+            tt.insert().values(transaction_id=tx2.id, tag_id=tag_food.id)
+        )
+        await db_session.execute(
+            tt.insert().values(transaction_id=tx1.id, tag_id=tag_travel.id)
+        )
+        await db_session.commit()
+
+        r = await client.get(
+            "/tags", params={"sort_by": "transaction_count", "sort_dir": "desc"}
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert items[0]["name"] == "food"
+        assert items[0]["transaction_count"] == 2
+        assert items[1]["name"] == "travel"
+        assert items[1]["transaction_count"] == 1
 
 
 # ---------------------------------------------------------------------------
