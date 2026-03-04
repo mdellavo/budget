@@ -148,7 +148,7 @@ class TestCsvImportQueries:
         assert ci2.enriched_rows == 0
         assert ci2.row_count == 8
         assert ci2.status == "in-progress"
-        # Old transactions deleted
+        # Existing transactions are preserved — upsert by fingerprint keeps them
         from sqlalchemy import select
 
         count = await db_session.scalar(
@@ -156,7 +156,7 @@ class TestCsvImportQueries:
                 Transaction.csv_import_id == existing.id
             )
         )
-        assert count == 0
+        assert count == 1
 
     async def test_mark_complete(self, db_session, make_account):
         acct = await make_account()
