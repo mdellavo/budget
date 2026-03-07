@@ -7,7 +7,6 @@ AI endpoints use `mocker` to patch module-level singletons.
 import io
 from datetime import date
 from decimal import Decimal
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -15,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from budget.database import Base
-from budget.main import _classify_gap, _run_enrichment, parse_amount, parse_date
+from budget.jobs import _run_enrichment
+from budget.main import _classify_gap, parse_amount, parse_date
 from budget.models import Account, CsvImport, Transaction
 
 # ---------------------------------------------------------------------------
@@ -557,17 +557,21 @@ class TestTransactions:
         )
         mocker.patch(
             "budget.main.enricher._enrich_batch",
-            return_value=[
-                {
-                    "index": 0,
-                    "description": "Starbucks Coffee",
-                    "merchant_name": "Starbucks",
-                    "merchant_location": "Seattle, WA",
-                    "category": "Food & Drink",
-                    "subcategory": "Coffee & Tea",
-                    "is_recurring": True,
-                }
-            ],
+            return_value=(
+                [
+                    {
+                        "index": 0,
+                        "description": "Starbucks Coffee",
+                        "merchant_name": "Starbucks",
+                        "merchant_location": "Seattle, WA",
+                        "category": "Food & Drink",
+                        "subcategory": "Coffee & Tea",
+                        "is_recurring": True,
+                    }
+                ],
+                0,
+                0,
+            ),
         )
         r = await client.post(
             "/transactions/re-enrich", json={"transaction_ids": [tx.id]}
@@ -1028,7 +1032,7 @@ class TestImportCsv:
             "budget.main.detector.detect",
             return_value={"date": 0, "amount": 1, "description": 2},
         )
-        mocker.patch("budget.main._run_enrichment", new=AsyncMock())
+        mocker.patch("budget.main._enrichment_queue.enqueue")
 
         csv_content = "Date,Amount,Description\n2024-01-15,-10.00,Coffee\n2024-01-16,-20.00,Lunch\n"
         r = await client.post(
@@ -1149,20 +1153,24 @@ class TestRunEnrichment:
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
         )
-        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch("budget.jobs.AsyncSessionLocal", factory)
         mocker.patch(
-            "budget.main.enricher._enrich_batch",
-            return_value=[
-                {
-                    "index": 0,
-                    "description": "Starbucks Coffee",
-                    "merchant_name": None,
-                    "merchant_location": None,
-                    "category": None,
-                    "subcategory": None,
-                    "is_recurring": False,
-                }
-            ],
+            "budget.jobs.enricher._enrich_batch",
+            return_value=(
+                [
+                    {
+                        "index": 0,
+                        "description": "Starbucks Coffee",
+                        "merchant_name": None,
+                        "merchant_location": None,
+                        "category": None,
+                        "subcategory": None,
+                        "is_recurring": False,
+                    }
+                ],
+                0,
+                0,
+            ),
         )
 
         async with factory() as session:
@@ -1223,20 +1231,24 @@ class TestRunEnrichment:
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
         )
-        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch("budget.jobs.AsyncSessionLocal", factory)
         mocker.patch(
-            "budget.main.enricher._enrich_batch",
-            return_value=[
-                {
-                    "index": 0,
-                    "description": "Grocery store",
-                    "merchant_name": None,
-                    "merchant_location": None,
-                    "category": None,
-                    "subcategory": None,
-                    "is_recurring": False,
-                }
-            ],
+            "budget.jobs.enricher._enrich_batch",
+            return_value=(
+                [
+                    {
+                        "index": 0,
+                        "description": "Grocery store",
+                        "merchant_name": None,
+                        "merchant_location": None,
+                        "category": None,
+                        "subcategory": None,
+                        "is_recurring": False,
+                    }
+                ],
+                0,
+                0,
+            ),
         )
 
         async with factory() as session:
@@ -1316,10 +1328,10 @@ class TestDeduplication:
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
         )
-        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch("budget.jobs.AsyncSessionLocal", factory)
         mocker.patch(
-            "budget.main.enricher._enrich_batch",
-            return_value=[self._batch_result()],
+            "budget.jobs.enricher._enrich_batch",
+            return_value=([self._batch_result()], 0, 0),
         )
 
         async with factory() as session:
@@ -1400,10 +1412,10 @@ class TestDeduplication:
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
         )
-        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch("budget.jobs.AsyncSessionLocal", factory)
         mocker.patch(
-            "budget.main.enricher._enrich_batch",
-            return_value=[self._batch_result()],
+            "budget.jobs.enricher._enrich_batch",
+            return_value=([self._batch_result()], 0, 0),
         )
 
         async with factory() as session:
@@ -1479,10 +1491,10 @@ class TestDeduplication:
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
         )
-        mocker.patch("budget.main.AsyncSessionLocal", factory)
+        mocker.patch("budget.jobs.AsyncSessionLocal", factory)
         mocker.patch(
-            "budget.main.enricher._enrich_batch",
-            return_value=[self._batch_result()],
+            "budget.jobs.enricher._enrich_batch",
+            return_value=([self._batch_result()], 0, 0),
         )
 
         async with factory() as session:
@@ -1619,7 +1631,7 @@ class TestReEnrichImport:
         )
         db_session.add(ci)
         await db_session.commit()
-        mocker.patch("budget.main._run_reenrichment_for_import", new=AsyncMock())
+        mocker.patch("budget.main._enrichment_queue.enqueue")
         r = await client.post(f"/imports/{ci.id}/re-enrich")
         assert r.status_code == 200
         assert r.json()["status"] == "processing"
@@ -1716,7 +1728,7 @@ class TestAbortImport:
         )
         db_session.add(ci)
         await db_session.commit()
-        mocker.patch("budget.main._run_reenrichment_for_import", new=AsyncMock())
+        mocker.patch("budget.main._enrichment_queue.enqueue")
         r = await client.post(f"/imports/{ci.id}/re-enrich")
         assert r.status_code == 200
         assert r.json()["status"] == "processing"

@@ -7,6 +7,7 @@ import type {
   CategoriesAllResponse,
   CategoriesResponse,
   CategoryTrendsResponse,
+  EnrichmentDebugResponse,
   ImportsResponse,
   ImportCsvResponse,
   ImportProgress,
@@ -732,5 +733,11 @@ export async function fetchTags(): Promise<{ items: string[] }> {
 export async function rematchTransfers(): Promise<{ pairs_linked: number }> {
   return handleResponse<{ pairs_linked: number }>(
     await fetch(`${BASE}/transfers/rematch`, { method: "POST", headers: authHeaders() })
+  );
+}
+
+export async function getEnrichmentDebug(): Promise<EnrichmentDebugResponse> {
+  return handleResponse<EnrichmentDebugResponse>(
+    await fetch(`${BASE}/debug/enrichment-batches`, { headers: authHeaders() })
   );
 }

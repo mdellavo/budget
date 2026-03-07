@@ -81,6 +81,25 @@ class CsvImport(Base):
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="csv_import"
     )
+    batches: Mapped[list["EnrichmentBatch"]] = relationship(back_populates="csv_import")
+
+
+class EnrichmentBatch(Base):
+    __tablename__ = "enrichment_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    csv_import_id: Mapped[int] = mapped_column(ForeignKey("csv_imports.id"))
+    batch_num: Mapped[int]
+    row_count: Mapped[int]
+    input_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
+    status: Mapped[str] = mapped_column(
+        String(20), default="success", server_default="'success'"
+    )
+    started_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    csv_import: Mapped["CsvImport"] = relationship(back_populates="batches")
 
 
 class Category(Base):

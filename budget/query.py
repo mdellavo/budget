@@ -17,6 +17,7 @@ from .models import (
     CardHolder,
     Category,
     CsvImport,
+    EnrichmentBatch,
     Merchant,
     Subcategory,
     Tag,
@@ -1893,3 +1894,111 @@ class AiSummaryCacheQueries:
                 AiSummaryCache.period_key == period_key,
             )
         )
+
+
+class EnrichmentBatchQueries:
+    def __init__(self, db: AsyncSession, user_id: int | None = None) -> None:
+        self.db = db
+        self.user_id = user_id
+
+    async def create(
+        self, csv_import_id: int, batch_num: int, row_count: int
+    ) -> EnrichmentBatch:
+        batch = EnrichmentBatch(
+            csv_import_id=csv_import_id,
+            batch_num=batch_num,
+            row_count=row_count,
+            started_at=datetime.utcnow(),
+        )
+        self.db.add(batch)
+        await self.db.flush()
+        return batch
+
+    async def complete(
+        self, batch_id: int, input_tokens: int, output_tokens: int
+    ) -> None:
+        await self.db.execute(
+            update(EnrichmentBatch)
+            .where(EnrichmentBatch.id == batch_id)
+            .values(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                status="success",
+                completed_at=datetime.utcnow(),
+            )
+        )
+
+    async def fail(self, batch_id: int) -> None:
+        await self.db.execute(
+            update(EnrichmentBatch)
+            .where(EnrichmentBatch.id == batch_id)
+            .values(status="failed", completed_at=datetime.utcnow())
+        )
+
+    async def summary(self) -> dict:
+        """Return all imports with their batch details, filtered by user_id."""
+        conditions = []
+        if self.user_id is not None:
+            conditions.append(CsvImport.user_id == self.user_id)
+
+        imports_result = await self.db.execute(
+            select(CsvImport).where(*conditions).order_by(CsvImport.imported_at.desc())
+        )
+        imports = imports_result.scalars().all()
+
+        import_ids = [imp.id for imp in imports]
+        batches_result = await self.db.execute(
+            select(EnrichmentBatch)
+            .where(EnrichmentBatch.csv_import_id.in_(import_ids))
+            .order_by(EnrichmentBatch.csv_import_id, EnrichmentBatch.batch_num)
+        )
+        batches = batches_result.scalars().all()
+
+        batches_by_import: dict[int, list[EnrichmentBatch]] = {}
+        for b in batches:
+            batches_by_import.setdefault(b.csv_import_id, []).append(b)
+
+        total_input = 0
+        total_output = 0
+        imports_out = []
+        for imp in imports:
+            imp_batches = batches_by_import.get(imp.id, [])
+            imp_input = sum(b.input_tokens for b in imp_batches)
+            imp_output = sum(b.output_tokens for b in imp_batches)
+            total_input += imp_input
+            total_output += imp_output
+            imports_out.append(
+                {
+                    "id": imp.id,
+                    "filename": imp.filename,
+                    "imported_at": imp.imported_at.isoformat(),
+                    "row_count": imp.row_count,
+                    "status": imp.status,
+                    "batch_count": len(imp_batches),
+                    "total_input_tokens": imp_input,
+                    "total_output_tokens": imp_output,
+                    "batches": [
+                        {
+                            "id": b.id,
+                            "batch_num": b.batch_num,
+                            "row_count": b.row_count,
+                            "input_tokens": b.input_tokens,
+                            "output_tokens": b.output_tokens,
+                            "status": b.status,
+                            "started_at": (
+                                b.started_at.isoformat() if b.started_at else None
+                            ),
+                            "completed_at": (
+                                b.completed_at.isoformat() if b.completed_at else None
+                            ),
+                        }
+                        for b in imp_batches
+                    ],
+                }
+            )
+
+        return {
+            "imports": imports_out,
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+        }

@@ -142,7 +142,7 @@ class TestTransactionEnricher:
                 "date": "2024-01-15",
             }
         ]
-        out = enricher._enrich_batch(batch, 0)
+        out, in_tok, out_tok = enricher._enrich_batch(batch, 0)
         assert len(out) == 1
         assert out[0]["merchant_name"] == "Starbucks"
         assert out[0]["is_recurring"] is False
@@ -183,7 +183,7 @@ class TestTransactionEnricher:
                 "date": "2024-01-01",
             }
         ]
-        out = enricher._enrich_batch(batch, 0)
+        out, in_tok, out_tok = enricher._enrich_batch(batch, 0)
         assert out[0]["merchant_name"] == "Netflix"
         assert out[0]["is_recurring"] is True
         assert enricher.client.messages.create.call_count == 2
@@ -246,7 +246,7 @@ class TestTransactionEnricher:
                 "date": "2024-01-01",
             },
         ]
-        out = enricher._enrich_batch(batch, 0)
+        out, in_tok, out_tok = enricher._enrich_batch(batch, 0)
         assert len(out) == 2
         assert out[0]["merchant_name"] == "Starbucks"
         assert out[0]["is_recurring"] is False

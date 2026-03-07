@@ -305,6 +305,35 @@ export interface TagItem {
   total_amount: string;
 }
 
+export interface BatchItem {
+  id: number;
+  batch_num: number;
+  row_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  status: "success" | "failed";
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface ImportBatchSummary {
+  id: number;
+  filename: string;
+  imported_at: string;
+  row_count: number;
+  status: string;
+  batch_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  batches: BatchItem[];
+}
+
+export interface EnrichmentDebugResponse {
+  imports: ImportBatchSummary[];
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
 export interface OverviewData {
   transaction_count: number;
   income: string;

@@ -281,7 +281,9 @@ class TransactionEnricher:
     def __init__(self):
         self.client = anthropic.Anthropic()
 
-    def _enrich_batch(self, batch: list[dict], batch_num: int) -> list[dict]:
+    def _enrich_batch(
+        self, batch: list[dict], batch_num: int
+    ) -> tuple[list[dict], int, int]:
         start = time.perf_counter()
         logger.info(
             "Enrichment batch %d starting: %d rows (indices %d–%d)",
@@ -303,6 +305,8 @@ class TransactionEnricher:
                 "input_schema": ENRICHMENT_SCHEMA,
             },
         ]
+        total_input = 0
+        total_output = 0
 
         while True:
             response = self.client.messages.create(
@@ -313,6 +317,8 @@ class TransactionEnricher:
                 tool_choice={"type": "any"},
                 messages=messages,
             )
+            total_input += response.usage.input_tokens
+            total_output += response.usage.output_tokens
 
             # Done — extract structured result
             for block in response.content:
@@ -326,7 +332,7 @@ class TransactionEnricher:
                     logger.info(
                         "Enrichment batch %d complete in %.2fs", batch_num, elapsed
                     )
-                    return results
+                    return results, total_input, total_output
 
             # Model used web_search or other tool — continue the loop
             if response.stop_reason != "tool_use":

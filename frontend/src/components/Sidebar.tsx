@@ -33,6 +33,7 @@ const NAV_GROUPS = [
       { to: "/cardholders", label: "Card Holders", icon: "💳" },
       { to: "/imports", label: "Imports", icon: "📋" },
       { to: "/duplicates", label: "Duplicates", icon: "⚠️" },
+      { to: "/debug", label: "Debug", icon: "🔧" },
     ],
   },
 ];

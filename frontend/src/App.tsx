@@ -21,6 +21,7 @@ import HelpPage from "./pages/HelpPage";
 import DuplicatesPage from "./pages/DuplicatesPage";
 import TagsPage from "./pages/TagsPage";
 import TransfersPage from "./pages/TransfersPage";
+import DebugPage from "./pages/DebugPage";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -84,6 +85,7 @@ export default function App() {
                       <Route path="/duplicates" element={<DuplicatesPage />} />
                       <Route path="/tags" element={<TagsPage />} />
                       <Route path="/transfers" element={<TransfersPage />} />
+                      <Route path="/debug" element={<DebugPage />} />
                       <Route path="/help" element={<HelpPage />} />
                     </Routes>
                   </main>

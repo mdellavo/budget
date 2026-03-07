@@ -745,6 +745,33 @@ export default function HelpPage() {
             </p>
           </div>
         </section>
+
+        <section id="debug">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Debug</h2>
+          <div className="space-y-3 text-sm text-gray-700">
+            <p>
+              The <strong>Debug</strong> page (Manage → Debug) shows per-import enrichment batch
+              statistics, including token counts and estimated API costs.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Summary card</h3>
+            <p>
+              The top card displays total input tokens, output tokens, combined token count, and an
+              estimated cost across all imports.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Import table</h3>
+            <p>
+              Each row represents one CSV import. Click a row to expand it and see the individual
+              batches that made up the enrichment run. Each batch shows row count, tokens, cost,
+              status (success or failed), and duration.
+            </p>
+            <h3 className="text-sm font-semibold text-gray-800 mt-4 mb-1">Pricing</h3>
+            <p>
+              Costs are estimated using claude-sonnet-4-6 list pricing: <strong>$3.00/MTok</strong>{" "}
+              input and <strong>$15.00/MTok</strong> output. Cache read tokens are not broken out
+              separately.
+            </p>
+          </div>
+        </section>
       </div>
     </div>
   );

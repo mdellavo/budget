@@ -1,6 +1,5 @@
 import asyncio
 import csv
-import hashlib
 import io
 import logging
 import os
@@ -8,12 +7,12 @@ from calendar import isleap, monthrange
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from statistics import median as _median
 from typing import Literal
 
+import redis as _redis  # type: ignore[import-untyped]
 from fastapi import (
-    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -28,6 +27,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from pydantic import BaseModel
+from rq import Queue as _Queue
 from sqlalchemy import select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -35,7 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import models  # noqa: F401 — ensures models are registered with Base
 from .ai import (
-    ENRICH_BATCH_SIZE,
     detector,
     enricher,
     merchant_duplicate_finder,
@@ -43,7 +42,13 @@ from .ai import (
     report_summarizer,
 )
 from .auth import create_access_token, get_current_user, verify_password
-from .database import AsyncSessionLocal, Base, engine, get_db
+from .database import Base, engine, get_db
+from .jobs import (  # noqa: F401 — re-exported so tests can still import from budget.main
+    parse_amount,
+    parse_date,
+    run_enrichment_job,
+    run_reenrichment_job,
+)
 from .models import (
     Category,
     Merchant,
@@ -71,6 +76,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+
+_redis_conn = _redis.Redis.from_url(
+    os.environ.get("REDIS_URL", "redis://localhost:6379")
+)
+_enrichment_queue = _Queue("enrichment", connection=_redis_conn)
 
 
 @asynccontextmanager
@@ -301,6 +311,24 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             pass
+
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS enrichment_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    csv_import_id INTEGER NOT NULL REFERENCES csv_imports(id),
+                    batch_num INTEGER NOT NULL,
+                    row_count INTEGER NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'success',
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT
+                )
+                """
+            )
+        )
 
     yield
 
@@ -600,255 +628,6 @@ async def google_login(
         "token_type": "bearer",
         "user": {"id": user.id, "email": user.email, "name": user.name},
     }
-
-
-DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%B %d, %Y"]
-
-
-def parse_date(value: str) -> date:
-    value = value.strip()
-    for fmt in DATE_FORMATS:
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    raise ValueError(f"Unrecognised date format: {value!r}")
-
-
-def parse_amount(value: str) -> Decimal:
-    cleaned = value.strip().lstrip("$").replace(",", "").replace(" ", "")
-    if cleaned.startswith("(") and cleaned.endswith(")"):
-        cleaned = "-" + cleaned[1:-1]
-    return Decimal(cleaned)
-
-
-def _make_fingerprint(
-    account_id: int,
-    date_val: date,
-    amount_val: Decimal,
-    raw_desc: str | None,
-) -> str:
-    """Return a 16-char hex fingerprint for a transaction row.
-
-    Stable across imports: re-importing an overlapping CSV silently skips
-    already-present rows.  Identical rows within the same import collapse to
-    one transaction; use the Duplicates page to review and exclude extras.
-    """
-    desc = (raw_desc or "").strip().lower()
-    base = f"{account_id}:{date_val}:{amount_val}:{desc}"
-    return hashlib.sha256(base.encode()).hexdigest()[:16]
-
-
-async def _run_enrichment(
-    enrich_input: list[dict],
-    rows: list[dict],
-    date_col: str,
-    amount_col: str,
-    desc_col: str | None,
-    account_id: int,
-    csv_import_id: int,
-    account_type: str | None = None,
-    user_id: int | None = None,
-) -> None:
-    logger.info(
-        "Background enrichment starting for csv_import_id=%d (%d rows)",
-        csv_import_id,
-        len(rows),
-    )
-
-    batches = [
-        enrich_input[i : i + ENRICH_BATCH_SIZE]
-        for i in range(0, len(enrich_input), ENRICH_BATCH_SIZE)
-    ]
-    sem = asyncio.Semaphore(3)
-
-    async def fetch_batch(batch, batch_num):
-        for attempt in range(1, 4):  # attempts 1, 2, 3
-            async with sem:
-                try:
-                    return await asyncio.to_thread(
-                        enricher._enrich_batch, batch, batch_num
-                    )
-                except Exception:
-                    if attempt == 3:
-                        raise
-                    logger.warning(
-                        "Batch %d attempt %d/%d failed for csv_import_id=%d, retrying…",
-                        batch_num,
-                        attempt,
-                        3,
-                        csv_import_id,
-                        exc_info=True,
-                    )
-            await asyncio.sleep(2**attempt)  # 2s, 4s between retries (outside sem)
-
-    tasks = [
-        asyncio.create_task(fetch_batch(batch, i)) for i, batch in enumerate(batches)
-    ]
-
-    async with AsyncSessionLocal() as db:
-        mq = MerchantQueries(db, user_id=user_id)
-        cq = CategoryQueries(db, user_id=user_id)
-        chq = CardHolderQueries(db, user_id=user_id)
-        csq = CsvImportQueries(db, user_id=user_id)
-        merchant_cache: dict[str, tuple[int, bool]] = {}  # name → (id, has_location)
-        category_cache: dict[str, int] = {}
-        subcategory_cache: dict[tuple, int] = {}
-        cardholder_cache: dict[str, int] = {}
-
-        for coro in asyncio.as_completed(tasks):
-            try:
-                batch_results = await coro
-            except Exception:
-                logger.exception("A batch failed for csv_import_id=%d", csv_import_id)
-                continue
-
-            attempted = len(batch_results)
-
-            for r in batch_results:
-                i = r["index"]
-                row = rows[i]
-
-                try:
-                    date_val = parse_date(row[date_col])
-                    amount_val = parse_amount(row[amount_col])
-                    if account_type == "Credit Card":
-                        amount_val = -amount_val
-                except (ValueError, InvalidOperation) as e:
-                    logger.warning(
-                        "csv_import_id=%d row %d parse error: %s", csv_import_id, i, e
-                    )
-                    continue
-
-                mname = r.get("merchant_name")
-                mlocation = r.get("merchant_location")
-                mwebsite = r.get("merchant_website")
-                cname = r.get("category")
-                need_want = r.get("need_want")
-                scname = r.get("subcategory")
-                cn = r.get("card_number")
-
-                merchant_id = None
-                if mname:
-                    merchant_id = await mq.find_or_create_for_enrichment(
-                        mname, mlocation, merchant_cache, mwebsite
-                    )
-
-                category_id = None
-                if cname:
-                    category_id = await cq.find_or_create_for_enrichment(
-                        cname, category_cache
-                    )
-
-                subcategory_id = None
-                if cname and scname:
-                    assert category_id is not None
-                    subcategory_id = await cq.find_or_create_subcategory_for_enrichment(
-                        category_id, scname, subcategory_cache, need_want
-                    )
-
-                cardholder_id = None
-                if cn:
-                    cardholder_id = await chq.find_or_create_for_enrichment(
-                        cn, cardholder_cache
-                    )
-
-                raw_description = row[desc_col].strip() if desc_col else None
-                description = r.get("description") or raw_description or ""
-                is_recurring = bool(r.get("is_recurring", False))
-                is_refund = bool(r.get("is_refund", False))
-                is_international = bool(r.get("is_international", False))
-                payment_channel = r.get("payment_channel")
-                tag_names = [
-                    t.strip().lower()
-                    for t in (r.get("suggested_tags") or [])
-                    if t.strip()
-                ]
-                fp = _make_fingerprint(
-                    account_id, date_val, amount_val, raw_description
-                )
-                stmt = sqlite_insert(Transaction).values(
-                    account_id=account_id,
-                    csv_import_id=csv_import_id,
-                    date=date_val,
-                    description=description,
-                    raw_description=raw_description,
-                    amount=amount_val,
-                    merchant_id=merchant_id,
-                    subcategory_id=subcategory_id,
-                    cardholder_id=cardholder_id,
-                    is_recurring=is_recurring,
-                    is_refund=is_refund,
-                    is_international=is_international,
-                    payment_channel=payment_channel,
-                    fingerprint=fp,
-                    user_id=user_id,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["user_id", "fingerprint"],
-                    set_={
-                        "description": stmt.excluded.description,
-                        "merchant_id": stmt.excluded.merchant_id,
-                        "subcategory_id": stmt.excluded.subcategory_id,
-                        "cardholder_id": stmt.excluded.cardholder_id,
-                        "is_recurring": stmt.excluded.is_recurring,
-                        "is_refund": stmt.excluded.is_refund,
-                        "is_international": stmt.excluded.is_international,
-                        "payment_channel": stmt.excluded.payment_channel,
-                        "csv_import_id": stmt.excluded.csv_import_id,
-                    },
-                ).returning(Transaction.id)
-                result = await db.execute(stmt)
-                tx_id = result.scalar_one()
-                for tag_name in tag_names:
-                    tag = await db.scalar(
-                        select(Tag).where(Tag.user_id == user_id, Tag.name == tag_name)
-                    )
-                    if not tag:
-                        tag = Tag(user_id=user_id, name=tag_name)
-                        db.add(tag)
-                        await db.flush()
-                    await db.execute(
-                        sqlite_insert(transaction_tags)
-                        .values(transaction_id=tx_id, tag_id=tag.id)
-                        .on_conflict_do_nothing()
-                    )
-
-            await db.commit()
-
-            await csq.increment_enriched(csv_import_id, attempted)
-            await db.commit()
-
-            # Check for abort between batches
-            async with AsyncSessionLocal() as abort_check:
-                imp_check = await CsvImportQueries(abort_check).get_by_id(csv_import_id)
-                if imp_check and imp_check.status == "aborted":
-                    for t in tasks:
-                        if not t.done():
-                            t.cancel()
-                    logger.info(
-                        "Background enrichment aborted for csv_import_id=%d",
-                        csv_import_id,
-                    )
-                    return  # Do NOT mark complete
-
-    if user_id is not None:
-        async with AsyncSessionLocal() as db:
-            tq = TransactionQueries(db, user_id=user_id)
-            await tq.match_transfers()
-            await db.commit()
-
-    async with AsyncSessionLocal() as db:
-        csq = CsvImportQueries(db)
-        await csq.mark_complete(csv_import_id)
-        await db.commit()
-
-    if user_id is not None:
-        async with AsyncSessionLocal() as db:
-            await AiSummaryCacheQueries(db, user_id=user_id).invalidate_all()
-            await db.commit()
-
-    logger.info("Background enrichment complete for csv_import_id=%d", csv_import_id)
 
 
 FREQUENCY_RANGES = [
@@ -1815,152 +1594,6 @@ async def get_import_progress(
     }
 
 
-async def _run_reenrichment_for_import(
-    csv_import_id: int, user_id: int | None = None
-) -> None:
-    logger.info("Re-enrichment starting for csv_import_id=%d", csv_import_id)
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(
-                Transaction.id,
-                Transaction.raw_description,
-                Transaction.amount,
-                Transaction.date,
-            ).where(
-                Transaction.csv_import_id == csv_import_id,
-                Transaction.raw_description.isnot(None),
-            )
-        )
-        rows = result.all()
-
-    if not rows:
-        async with AsyncSessionLocal() as db:
-            await CsvImportQueries(db).mark_complete(csv_import_id)
-            await db.commit()
-        return
-
-    enrich_input = [
-        {
-            "index": i,
-            "description": r.raw_description,
-            "amount": str(r.amount),
-            "date": str(r.date),
-        }
-        for i, r in enumerate(rows)
-    ]
-    tx_ids = [r.id for r in rows]
-
-    batches = [
-        enrich_input[i : i + ENRICH_BATCH_SIZE]
-        for i in range(0, len(enrich_input), ENRICH_BATCH_SIZE)
-    ]
-    sem = asyncio.Semaphore(3)
-
-    async def fetch_batch(batch, batch_num):
-        for attempt in range(1, 4):
-            async with sem:
-                try:
-                    return await asyncio.to_thread(
-                        enricher._enrich_batch, batch, batch_num
-                    )
-                except Exception:
-                    if attempt == 3:
-                        raise
-                    logger.warning(
-                        "Re-enrich batch %d attempt %d failed for csv_import_id=%d",
-                        batch_num,
-                        attempt,
-                        csv_import_id,
-                        exc_info=True,
-                    )
-            await asyncio.sleep(2**attempt)
-
-    tasks = [
-        asyncio.create_task(fetch_batch(batch, i)) for i, batch in enumerate(batches)
-    ]
-
-    async with AsyncSessionLocal() as db:
-        mq = MerchantQueries(db, user_id=user_id)
-        cq = CategoryQueries(db, user_id=user_id)
-        chq = CardHolderQueries(db, user_id=user_id)
-        csq = CsvImportQueries(db, user_id=user_id)
-        merchant_cache: dict[str, tuple[int, bool]] = {}
-        category_cache: dict[str, int] = {}
-        subcategory_cache: dict[tuple, int] = {}
-        cardholder_cache: dict[str, int] = {}
-
-        for coro in asyncio.as_completed(tasks):
-            try:
-                batch_results = await coro
-            except Exception:
-                logger.exception(
-                    "Re-enrich batch failed for csv_import_id=%d", csv_import_id
-                )
-                continue
-
-            for r in batch_results:
-                tx = await db.get(Transaction, tx_ids[r["index"]])
-                if tx is None:
-                    continue
-
-                mname = r.get("merchant_name")
-                if mname:
-                    tx.merchant_id = await mq.find_or_create_for_enrichment(
-                        mname,
-                        r.get("merchant_location"),
-                        merchant_cache,
-                        r.get("merchant_website"),
-                    )
-                else:
-                    tx.merchant_id = None
-
-                cname, scname = r.get("category"), r.get("subcategory")
-                if cname and scname:
-                    cid = await cq.find_or_create_for_enrichment(cname, category_cache)
-                    tx.subcategory_id = (
-                        await cq.find_or_create_subcategory_for_enrichment(
-                            cid, scname, subcategory_cache, r.get("need_want")
-                        )
-                    )
-                else:
-                    tx.subcategory_id = None
-
-                cn = r.get("card_number")
-                if cn:
-                    tx.cardholder_id = await chq.find_or_create_for_enrichment(
-                        cn, cardholder_cache
-                    )
-                else:
-                    tx.cardholder_id = None
-
-                if r.get("description"):
-                    tx.description = r["description"]
-                tx.is_recurring = bool(r.get("is_recurring", False))
-
-            await db.commit()
-            await csq.increment_enriched(csv_import_id, len(batch_results))
-            await db.commit()
-
-            # Check for abort between batches
-            async with AsyncSessionLocal() as abort_check:
-                imp_check = await CsvImportQueries(abort_check).get_by_id(csv_import_id)
-                if imp_check and imp_check.status == "aborted":
-                    for t in tasks:
-                        if not t.done():
-                            t.cancel()
-                    logger.info(
-                        "Re-enrichment aborted for csv_import_id=%d", csv_import_id
-                    )
-                    return  # Do NOT mark complete
-
-    async with AsyncSessionLocal() as db:
-        await CsvImportQueries(db).mark_complete(csv_import_id)
-        await db.commit()
-
-    logger.info("Re-enrichment complete for csv_import_id=%d", csv_import_id)
-
-
 @app.post("/imports/{import_id}/abort")
 async def abort_import(
     import_id: int,
@@ -1983,7 +1616,6 @@ async def abort_import(
 @app.post("/imports/{import_id}/re-enrich")
 async def re_enrich_import(
     import_id: int,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1995,13 +1627,14 @@ async def re_enrich_import(
         raise HTTPException(status_code=409, detail="Import is already being enriched")
     await csq.reset_for_reenrichment(import_id)
     await db.commit()
-    background_tasks.add_task(_run_reenrichment_for_import, import_id, current_user.id)
+    _enrichment_queue.enqueue(
+        run_reenrichment_job, import_id, current_user.id, job_timeout=1800
+    )
     return {"status": "processing", "csv_import_id": import_id}
 
 
 @app.post("/import-csv")
 async def import_csv(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     account_name: str = Form(...),
     account_type: str | None = Form(None),
@@ -2061,8 +1694,8 @@ async def import_csv(
 
     await db.commit()
 
-    background_tasks.add_task(
-        _run_enrichment,
+    _enrichment_queue.enqueue(
+        run_enrichment_job,
         enrich_input,
         rows,
         date_col,
@@ -2072,6 +1705,7 @@ async def import_csv(
         csv_import.id,
         account_type,
         current_user.id,
+        job_timeout=1800,
     )
 
     return {
@@ -2427,7 +2061,9 @@ async def re_enrich_transactions(
     ]
 
     try:
-        results = await asyncio.to_thread(enricher._enrich_batch, enrich_input, 0)
+        results, _in_tok, _out_tok = await asyncio.to_thread(
+            enricher._enrich_batch, enrich_input, 0
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI enrichment failed: {e}")
 
@@ -3090,3 +2726,14 @@ async def create_budgets_batch(
 
     await db.commit()
     return {"created": created, "skipped": skipped}
+
+
+@app.get("/debug/enrichment-batches")
+async def debug_enrichment_batches(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from .query import EnrichmentBatchQueries
+
+    bq = EnrichmentBatchQueries(db, current_user.id)
+    return await bq.summary()

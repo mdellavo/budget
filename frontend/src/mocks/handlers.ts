@@ -66,4 +66,7 @@ export const handlers = [
   http.get("/api/recurring/summary", () => HttpResponse.json(null, { status: 502 })),
   http.get("/api/category-trends/summary", () => HttpResponse.json(null, { status: 502 })),
   http.post("/api/transfers/rematch", () => HttpResponse.json({ pairs_linked: 0 })),
+  http.get("/api/debug/enrichment-batches", () =>
+    HttpResponse.json({ imports: [], total_input_tokens: 0, total_output_tokens: 0 })
+  ),
 ];
