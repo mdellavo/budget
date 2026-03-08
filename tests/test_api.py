@@ -304,6 +304,77 @@ class TestImports:
 
 
 # ---------------------------------------------------------------------------
+# Delete Import
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteImport:
+    async def _make_csv_import(self, db_session, make_account, status="complete"):
+        acct = await make_account("Delete Import Account")
+        ci = CsvImport(
+            user_id=1,
+            account_id=acct.id,
+            filename="todelete.csv",
+            row_count=5,
+            enriched_rows=5,
+            status=status,
+        )
+        db_session.add(ci)
+        await db_session.commit()
+        return ci
+
+    async def test_delete_removes_import_and_transactions(
+        self, client, db_session, make_account, make_transaction
+    ):
+        ci = await self._make_csv_import(db_session, make_account)
+        acct_id = ci.account_id
+        t1 = await make_transaction(acct_id, csv_import_id=ci.id)
+        t2 = await make_transaction(acct_id, csv_import_id=ci.id)
+
+        r = await client.delete(f"/imports/{ci.id}")
+        assert r.status_code == 204
+
+        # Import no longer in list
+        r2 = await client.get("/imports")
+        assert all(item["id"] != ci.id for item in r2.json()["items"])
+
+        # Transactions deleted
+        t1_row = await db_session.get(Transaction, t1.id)
+        t2_row = await db_session.get(Transaction, t2.id)
+        assert t1_row is None
+        assert t2_row is None
+
+    async def test_delete_returns_404_for_missing(self, client):
+        r = await client.delete("/imports/99999")
+        assert r.status_code == 404
+
+    async def test_delete_clears_linked_transaction_id(
+        self, client, db_session, make_account, make_transaction
+    ):
+        ci = await self._make_csv_import(db_session, make_account)
+        acct_id = ci.account_id
+
+        # A transaction in this import
+        t_in = await make_transaction(acct_id, csv_import_id=ci.id)
+
+        # A transaction NOT in this import, but linked to t_in
+        t_ext = await make_transaction(acct_id)
+        t_ext.linked_transaction_id = t_in.id
+        await db_session.commit()
+
+        r = await client.delete(f"/imports/{ci.id}")
+        assert r.status_code == 204
+
+        await db_session.refresh(t_ext)
+        assert t_ext.linked_transaction_id is None
+
+    async def test_delete_in_progress_import(self, client, db_session, make_account):
+        ci = await self._make_csv_import(db_session, make_account, status="in-progress")
+        r = await client.delete(f"/imports/{ci.id}")
+        assert r.status_code == 204
+
+
+# ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
 
@@ -1407,7 +1478,7 @@ class TestDeduplication:
         await eng.dispose()
 
     async def test_upsert_does_not_create_duplicate(self, mocker):
-        """Re-importing a duplicate row upserts it; skipped_duplicates stays 0 and count stays 1."""
+        """Re-importing a duplicate row upserts it; skipped_duplicates == 1 and transaction count stays 1."""
         eng = await self._setup_db()
         factory = async_sessionmaker(
             bind=eng, class_=AsyncSession, expire_on_commit=False
@@ -1471,7 +1542,7 @@ class TestDeduplication:
 
         async with factory() as session:
             ci2_obj = await session.get(CsvImport, ci2_id)
-            assert ci2_obj.skipped_duplicates == 0
+            assert ci2_obj.skipped_duplicates == 1
             txs = (
                 (
                     await session.execute(
@@ -3242,3 +3313,145 @@ class TestTransferLinking:
         assert r.status_code == 200
         data = r.json()
         assert data["pairs_linked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Mixed categories
+# ---------------------------------------------------------------------------
+
+
+class TestMixedCategoryMerchants:
+    async def test_mixed_merchant_appears(
+        self, client, make_account, make_merchant, make_category, make_transaction
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Amazon")
+        _, sub1 = await make_category("Shopping", "Electronics")
+        _, sub2 = await make_category("Groceries", "Food")
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub1.id,
+            amount=Decimal("-50.00"),
+            txn_date=date(2024, 1, 1),
+        )
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub2.id,
+            amount=Decimal("-30.00"),
+            txn_date=date(2024, 1, 2),
+        )
+        r = await client.get("/merchants/mixed-categories")
+        assert r.status_code == 200
+        groups = r.json()["groups"]
+        assert len(groups) == 1
+        assert groups[0]["merchant_name"] == "Amazon"
+        assert sorted(groups[0]["categories"]) == ["Groceries", "Shopping"]
+        assert len(groups[0]["transactions"]) == 2
+
+    async def test_single_category_merchant_excluded(
+        self, client, make_account, make_merchant, make_category, make_transaction
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("Starbucks")
+        _, sub = await make_category("Food & Drink", "Coffee")
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub.id,
+            amount=Decimal("-5.00"),
+            txn_date=date(2024, 1, 1),
+        )
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub.id,
+            amount=Decimal("-5.50"),
+            txn_date=date(2024, 1, 2),
+        )
+        r = await client.get("/merchants/mixed-categories")
+        assert r.status_code == 200
+        assert r.json()["groups"] == []
+
+    async def test_excluded_transactions_ignored(
+        self,
+        client,
+        make_account,
+        make_merchant,
+        make_category,
+        make_transaction,
+        db_session,
+    ):
+        from budget.models import Transaction as Txn
+
+        acct = await make_account()
+        merchant = await make_merchant("BigStore")
+        _, sub1 = await make_category("Shopping", "General")
+        _, sub2 = await make_category("Groceries", "Food")
+        t1 = await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub1.id,
+            amount=Decimal("-20.00"),
+            txn_date=date(2024, 1, 1),
+        )
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub2.id,
+            amount=Decimal("-20.00"),
+            txn_date=date(2024, 1, 2),
+        )
+        # Exclude the second transaction so merchant only has one active category
+        await db_session.execute(
+            __import__("sqlalchemy")
+            .update(Txn)
+            .where(Txn.merchant_id == merchant.id, Txn.subcategory_id == sub2.id)
+            .values(is_excluded=True)
+        )
+        await db_session.commit()
+
+        r = await client.get("/merchants/mixed-categories")
+        assert r.status_code == 200
+        # Only t1 (Shopping) remains active — not mixed
+        groups = r.json()["groups"]
+        assert not any(g["merchant_id"] == t1.merchant_id for g in groups)
+
+    async def test_response_shape(
+        self, client, make_account, make_merchant, make_category, make_transaction
+    ):
+        acct = await make_account()
+        merchant = await make_merchant("TestShop")
+        _, sub1 = await make_category("CatA", "SubA")
+        _, sub2 = await make_category("CatB", "SubB")
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub1.id,
+            txn_date=date(2024, 2, 1),
+        )
+        await make_transaction(
+            acct.id,
+            merchant_id=merchant.id,
+            subcategory_id=sub2.id,
+            txn_date=date(2024, 2, 2),
+        )
+        r = await client.get("/merchants/mixed-categories")
+        assert r.status_code == 200
+        group = r.json()["groups"][0]
+        assert "merchant_id" in group
+        assert "merchant_name" in group
+        assert isinstance(group["categories"], list)
+        assert group["categories"] == sorted(group["categories"])
+        tx = group["transactions"][0]
+        for field in (
+            "id",
+            "date",
+            "description",
+            "amount",
+            "category",
+            "subcategory",
+            "account",
+        ):
+            assert field in tx

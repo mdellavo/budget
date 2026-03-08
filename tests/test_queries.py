@@ -7,8 +7,9 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
-from budget.models import CsvImport, Merchant, Transaction
+from budget.models import CsvImport, EnrichmentBatch, Merchant, Transaction
 from budget.query import (
     AccountQueries,
     AnalyticsQueries,
@@ -211,6 +212,9 @@ class TestCsvImportQueries:
             status="complete",
         )
         db_session.add(ci)
+        await db_session.flush()
+        batch = EnrichmentBatch(csv_import_id=ci.id, batch_num=1, row_count=10)
+        db_session.add(batch)
         await db_session.commit()
         csq = CsvImportQueries(db_session)
         await csq.reset_for_reenrichment(ci.id)
@@ -218,6 +222,31 @@ class TestCsvImportQueries:
         await db_session.refresh(ci)
         assert ci.status == "in-progress"
         assert ci.enriched_rows == 0
+        remaining = await db_session.execute(
+            select(EnrichmentBatch).where(EnrichmentBatch.csv_import_id == ci.id)
+        )
+        assert remaining.scalars().all() == []
+
+    async def test_upsert_reimport_clears_batches(self, db_session, make_account):
+        acct = await make_account()
+        csq = CsvImportQueries(db_session, user_id=1)
+        ci = await csq.upsert(
+            acct.id, "bank.csv", 5, {"date": 0, "amount": 1, "description": 2}, None
+        )
+        await db_session.flush()
+        batch = EnrichmentBatch(csv_import_id=ci.id, batch_num=1, row_count=5)
+        db_session.add(batch)
+        await db_session.commit()
+        # Re-import same file — upsert with existing record
+        existing = await csq.find_by_filename("bank.csv")
+        await csq.upsert(
+            acct.id, "bank.csv", 5, {"date": 0, "amount": 1, "description": 2}, existing
+        )
+        await db_session.commit()
+        remaining = await db_session.execute(
+            select(EnrichmentBatch).where(EnrichmentBatch.csv_import_id == ci.id)
+        )
+        assert remaining.scalars().all() == []
 
 
 # ---------------------------------------------------------------------------

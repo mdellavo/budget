@@ -3,6 +3,7 @@ import csv
 import io
 import logging
 import os
+import pathlib
 from calendar import isleap, monthrange
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -28,10 +29,13 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from pydantic import BaseModel
 from rq import Queue as _Queue
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from alembic import command as _alembic_command  # type: ignore[attr-defined]
+from alembic.config import Config as _AlembicConfig
 
 from . import models  # noqa: F401 — ensures models are registered with Base
 from .ai import (
@@ -42,7 +46,7 @@ from .ai import (
     report_summarizer,
 )
 from .auth import create_access_token, get_current_user, verify_password
-from .database import Base, engine, get_db
+from .database import get_db
 from .jobs import (  # noqa: F401 — re-exported so tests can still import from budget.main
     parse_amount,
     parse_date,
@@ -75,6 +79,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
 _redis_conn = _redis.Redis.from_url(
@@ -85,251 +91,8 @@ _enrichment_queue = _Queue("enrichment", connection=_redis_conn)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        try:
-            await conn.execute(
-                text(
-                    "ALTER TABLE csv_imports ADD COLUMN enriched_rows INTEGER NOT NULL DEFAULT 0"
-                )
-            )
-        except Exception:
-            pass  # column already exists on fresh or previously-migrated DB
-        try:
-            await conn.execute(text("ALTER TABLE merchants ADD COLUMN location TEXT"))
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text(
-                    "ALTER TABLE transactions ADD COLUMN is_recurring BOOLEAN NOT NULL DEFAULT 0"
-                )
-            )
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text(
-                    "ALTER TABLE csv_imports ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'"
-                )
-            )
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text("ALTER TABLE transactions ADD COLUMN raw_description TEXT")
-            )
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text(
-                    "ALTER TABLE transactions ADD COLUMN cardholder_id INTEGER REFERENCES cardholders(id)"
-                )
-            )
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text("ALTER TABLE categories ADD COLUMN classification TEXT")
-            )
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text("ALTER TABLE subcategories ADD COLUMN classification TEXT")
-            )
-        except Exception:
-            pass  # column already exists
-
-        # --- Multi-user migrations ---
-        # Recreate tables that need user_id NOT NULL + unique constraints
-        for table_check, create_sql, insert_sql in [
-            (
-                "accounts",
-                """CREATE TABLE accounts_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    name TEXT NOT NULL,
-                    institution TEXT,
-                    account_type TEXT,
-                    created_at DATETIME NOT NULL,
-                    UNIQUE(user_id, name)
-                )""",
-                "INSERT INTO accounts_new SELECT id, (SELECT MIN(id) FROM users), name, institution, account_type, created_at FROM accounts",
-            ),
-            (
-                "categories",
-                """CREATE TABLE categories_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    name TEXT NOT NULL,
-                    UNIQUE(user_id, name)
-                )""",
-                "INSERT INTO categories_new SELECT id, (SELECT MIN(id) FROM users), name FROM categories",
-            ),
-            (
-                "merchants",
-                """CREATE TABLE merchants_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    name TEXT NOT NULL,
-                    location TEXT,
-                    UNIQUE(user_id, name)
-                )""",
-                "INSERT INTO merchants_new SELECT id, (SELECT MIN(id) FROM users), name, location FROM merchants",
-            ),
-            (
-                "tags",
-                """CREATE TABLE tags_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    name TEXT NOT NULL,
-                    UNIQUE(user_id, name)
-                )""",
-                "INSERT INTO tags_new SELECT id, (SELECT MIN(id) FROM users), name FROM tags",
-            ),
-            (
-                "cardholders",
-                """CREATE TABLE cardholders_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    name TEXT,
-                    card_number TEXT,
-                    UNIQUE(user_id, card_number)
-                )""",
-                "INSERT INTO cardholders_new SELECT id, (SELECT MIN(id) FROM users), name, card_number FROM cardholders",
-            ),
-            (
-                "csv_imports",
-                """CREATE TABLE csv_imports_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    account_id INTEGER NOT NULL REFERENCES accounts(id),
-                    filename TEXT NOT NULL,
-                    imported_at DATETIME NOT NULL,
-                    row_count INTEGER NOT NULL,
-                    enriched_rows INTEGER NOT NULL DEFAULT 0,
-                    status TEXT NOT NULL DEFAULT 'in-progress',
-                    column_mapping TEXT
-                )""",
-                "INSERT INTO csv_imports_new SELECT id, (SELECT MIN(id) FROM users), account_id, filename, imported_at, row_count, enriched_rows, status, column_mapping FROM csv_imports",
-            ),
-            (
-                "transactions",
-                """CREATE TABLE transactions_new (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    account_id INTEGER NOT NULL REFERENCES accounts(id),
-                    csv_import_id INTEGER REFERENCES csv_imports(id),
-                    date DATE NOT NULL,
-                    description TEXT NOT NULL,
-                    raw_description TEXT,
-                    amount NUMERIC(12, 2) NOT NULL,
-                    merchant_id INTEGER REFERENCES merchants(id),
-                    subcategory_id INTEGER REFERENCES subcategories(id),
-                    cardholder_id INTEGER REFERENCES cardholders(id),
-                    notes TEXT,
-                    is_recurring BOOLEAN NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL
-                )""",
-                "INSERT INTO transactions_new SELECT id, (SELECT MIN(id) FROM users), account_id, csv_import_id, date, description, raw_description, amount, merchant_id, subcategory_id, cardholder_id, notes, is_recurring, created_at FROM transactions",
-            ),
-        ]:
-            result = await conn.execute(text(f"PRAGMA table_info({table_check})"))
-            col_info = {row[1]: row[3] for row in result}
-            # Migrate if user_id is missing or nullable (notnull flag == 0)
-            if "user_id" not in col_info or col_info.get("user_id") == 0:
-                await conn.execute(text(create_sql))
-                await conn.execute(text(insert_sql))
-                await conn.execute(text(f"DROP TABLE {table_check}"))
-                await conn.execute(
-                    text(f"ALTER TABLE {table_check}_new RENAME TO {table_check}")
-                )
-
-        # Add google_id to users
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN google_id TEXT"))
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id "
-                    "ON users(google_id) WHERE google_id IS NOT NULL"
-                )
-            )
-        except Exception:
-            pass
-
-        try:
-            await conn.execute(text("ALTER TABLE merchants ADD COLUMN website TEXT"))
-        except Exception:
-            pass  # column already exists
-
-        try:
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS budgets (
-                        id INTEGER PRIMARY KEY,
-                        user_id INTEGER NOT NULL REFERENCES users(id),
-                        category_id INTEGER REFERENCES categories(id),
-                        subcategory_id INTEGER REFERENCES subcategories(id),
-                        amount_limit NUMERIC(12,2) NOT NULL,
-                        created_at DATETIME NOT NULL,
-                        UNIQUE(user_id, category_id),
-                        UNIQUE(user_id, subcategory_id)
-                    )
-                """
-                )
-            )
-        except Exception:
-            pass
-
-        for col_sql in [
-            "ALTER TABLE transactions ADD COLUMN is_refund BOOLEAN NOT NULL DEFAULT 0",
-            "ALTER TABLE transactions ADD COLUMN is_international BOOLEAN NOT NULL DEFAULT 0",
-            "ALTER TABLE transactions ADD COLUMN payment_channel TEXT",
-            "ALTER TABLE transactions ADD COLUMN fingerprint TEXT",
-            "ALTER TABLE csv_imports ADD COLUMN skipped_duplicates INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE transactions ADD COLUMN is_excluded BOOLEAN NOT NULL DEFAULT 0",
-            "ALTER TABLE transactions ADD COLUMN linked_transaction_id INTEGER REFERENCES transactions(id)",
-        ]:
-            try:
-                await conn.execute(text(col_sql))
-            except Exception:
-                pass
-
-        try:
-            await conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_transactions_user_fingerprint"
-                    " ON transactions(user_id, fingerprint)"
-                    " WHERE fingerprint IS NOT NULL"
-                )
-            )
-        except Exception:
-            pass
-
-        await conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS enrichment_batches (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    csv_import_id INTEGER NOT NULL REFERENCES csv_imports(id),
-                    batch_num INTEGER NOT NULL,
-                    row_count INTEGER NOT NULL,
-                    input_tokens INTEGER NOT NULL DEFAULT 0,
-                    output_tokens INTEGER NOT NULL DEFAULT 0,
-                    status TEXT NOT NULL DEFAULT 'success',
-                    started_at TEXT NOT NULL,
-                    completed_at TEXT
-                )
-                """
-            )
-        )
-
+    alembic_cfg = _AlembicConfig(str(_PROJECT_ROOT / "alembic.ini"))
+    _alembic_command.upgrade(alembic_cfg, "head")
     yield
 
 
@@ -1314,6 +1077,16 @@ def _merchant_row(merchant: Merchant, transaction_count: int, total_amount) -> d
     }
 
 
+@app.get("/merchants/mixed-categories")
+async def get_mixed_category_merchants(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mq = MerchantQueries(db, user_id=current_user.id)
+    groups = await mq.find_mixed_category_merchants()
+    return {"groups": groups}
+
+
 @app.get("/merchants/{merchant_id}")
 async def get_merchant(
     merchant_id: int,
@@ -1563,6 +1336,7 @@ async def list_imports(
                 "imported_at": r.imported_at.isoformat() + "Z",
                 "row_count": r.row_count,
                 "enriched_rows": r.enriched_rows,
+                "skipped_duplicates": r.skipped_duplicates,
                 "status": r.status,
                 "transaction_count": r.transaction_count,
             }
@@ -1631,6 +1405,21 @@ async def re_enrich_import(
         run_reenrichment_job, import_id, current_user.id, job_timeout=1800
     )
     return {"status": "processing", "csv_import_id": import_id}
+
+
+@app.delete("/imports/{import_id}", status_code=204)
+async def delete_import(
+    import_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    iq = CsvImportQueries(db, user_id=current_user.id)
+    deleted = await iq.delete(import_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Import not found")
+    cache_q = AiSummaryCacheQueries(db, user_id=current_user.id)
+    await cache_q.invalidate_all()
+    await db.commit()
 
 
 @app.post("/import-csv")

@@ -7,6 +7,7 @@ import {
   getImportProgress,
   reEnrichImport,
   abortImport,
+  deleteImport,
   ApiResponseError,
 } from "../api/client";
 import type { ImportFilters } from "../api/client";
@@ -68,6 +69,8 @@ function ColumnMappingTable({ columns, mapping }: { columns: string[]; mapping: 
 
 export default function ImportsPage() {
   // List state
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [filters, setFilters] = useState<FormFilters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FormFilters>(EMPTY_FILTERS);
   const [sortBy, setSortBy] = useState<SortKey>("imported_at");
@@ -246,6 +249,19 @@ export default function ImportsPage() {
       await abortImport(importId);
     } catch {
       fetchFirstPage(appliedFilters, sortBy, sortDir);
+    }
+  }
+
+  async function handleDelete(importId: number) {
+    setDeletingId(importId);
+    setConfirmingDeleteId(null);
+    try {
+      await deleteImport(importId);
+      setPages((prev) => prev.map((page) => page.filter((item) => item.id !== importId)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete import");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -514,6 +530,9 @@ export default function ImportsPage() {
                   </button>
                 </th>
               ))}
+              <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">
+                Dupes
+              </th>
               <th className="px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">
                 Status
               </th>
@@ -522,7 +541,7 @@ export default function ImportsPage() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
                   <div className="flex items-center justify-center gap-2">
                     <svg
                       className="animate-spin h-4 w-4 text-indigo-500"
@@ -546,7 +565,7 @@ export default function ImportsPage() {
               </tr>
             ) : allRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
                   No imports yet.{" "}
                   <button
                     onClick={() => setShowImportForm(true)}
@@ -578,9 +597,16 @@ export default function ImportsPage() {
                       {row.transaction_count}
                     </Link>
                   </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {row.skipped_duplicates > 0 ? (
+                      <span className="text-amber-600">{row.skipped_duplicates}</span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     {row.status === "complete" || row.status === "aborted" ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {row.status === "complete" ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">
                             Complete
@@ -596,6 +622,32 @@ export default function ImportsPage() {
                         >
                           Re-enrich
                         </button>
+                        {confirmingDeleteId === row.id ? (
+                          <span className="flex items-center gap-2 text-xs">
+                            <span className="text-red-600">Delete all transactions?</span>
+                            <button
+                              onClick={() => handleDelete(row.id)}
+                              className="text-red-600 hover:underline font-medium"
+                            >
+                              Yes, delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmingDeleteId(null)}
+                              className="text-gray-500 hover:underline"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmingDeleteId(row.id)}
+                            disabled={deletingId === row.id}
+                            className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50"
+                            title="Delete import and all transactions"
+                          >
+                            {deletingId === row.id ? "Deleting…" : "Delete"}
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div className="min-w-[120px]">
@@ -621,6 +673,32 @@ export default function ImportsPage() {
                             }}
                           />
                         </div>
+                        {confirmingDeleteId === row.id ? (
+                          <span className="flex items-center gap-2 text-xs mt-1">
+                            <span className="text-red-600">Delete all transactions?</span>
+                            <button
+                              onClick={() => handleDelete(row.id)}
+                              className="text-red-600 hover:underline font-medium"
+                            >
+                              Yes, delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmingDeleteId(null)}
+                              className="text-gray-500 hover:underline"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmingDeleteId(row.id)}
+                            disabled={deletingId === row.id}
+                            className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50 mt-1"
+                            title="Delete import and all transactions"
+                          >
+                            {deletingId === row.id ? "Deleting…" : "Delete"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </td>

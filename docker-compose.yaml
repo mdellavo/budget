@@ -6,8 +6,36 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DATABASE_URL=sqlite+aiosqlite:////data/budget.db
+      - REDIS_URL=redis://redis:6379
     volumes:
       - budget_data:/data
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: ["rq", "worker", "--url", "redis://redis:6379", "enrichment"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=sqlite+aiosqlite:////data/budget.db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - budget_data:/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  rq-dashboard:
+    image: eoranged/rq-dashboard
+    command: ["--redis-url", "redis://redis:6379"]
+    ports:
+      - "9181:9181"
+    depends_on:
+      - redis
 
   frontend:
     build: ./frontend

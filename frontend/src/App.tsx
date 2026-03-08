@@ -22,6 +22,7 @@ import DuplicatesPage from "./pages/DuplicatesPage";
 import TagsPage from "./pages/TagsPage";
 import TransfersPage from "./pages/TransfersPage";
 import DebugPage from "./pages/DebugPage";
+import MixedCategoriesPage from "./pages/MixedCategoriesPage";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -85,6 +86,7 @@ export default function App() {
                       <Route path="/duplicates" element={<DuplicatesPage />} />
                       <Route path="/tags" element={<TagsPage />} />
                       <Route path="/transfers" element={<TransfersPage />} />
+                      <Route path="/merchants/mixed-categories" element={<MixedCategoriesPage />} />
                       <Route path="/debug" element={<DebugPage />} />
                       <Route path="/help" element={<HelpPage />} />
                     </Routes>

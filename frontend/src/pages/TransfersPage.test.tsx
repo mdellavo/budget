@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -43,6 +43,10 @@ function renderPage() {
 }
 
 describe("TransfersPage", () => {
+  beforeEach(() => {
+    (globalThis as unknown as Record<string, unknown>).Plotly = { react: vi.fn() };
+  });
+
   it("shows loading initially", () => {
     server.use(http.get("/api/transactions", () => new Promise(() => {})));
     renderPage();
@@ -160,6 +164,95 @@ describe("TransfersPage", () => {
         expect.objectContaining({ clear_linked_transaction: true })
       );
     });
+  });
+
+  it("renders the transfer flows chart when matched pairs exist", async () => {
+    const debit = makeTransfer({
+      id: 1,
+      amount: "-500.00",
+      account: "Checking",
+      linked_transaction_id: 2,
+    });
+    const credit = makeTransfer({
+      id: 2,
+      amount: "500.00",
+      account: "Savings",
+      linked_transaction_id: 1,
+    });
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [debit, credit],
+          has_more: false,
+          next_cursor: null,
+          total_count: 2,
+          total_amount: "0",
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Transfer Flows");
+    const plotly = (globalThis as Record<string, unknown>).Plotly as {
+      react: ReturnType<typeof vi.fn>;
+    };
+    await waitFor(() => expect(plotly.react).toHaveBeenCalled());
+  });
+
+  it("does not render the chart when there are no matched pairs", async () => {
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [],
+          has_more: false,
+          next_cursor: null,
+          total_count: 0,
+          total_amount: "0",
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("No matched pairs.");
+    expect(screen.queryByText("Transfer Flows")).not.toBeInTheDocument();
+  });
+
+  it("shows All time preset as active by default", async () => {
+    server.use(
+      http.get("/api/transactions", () =>
+        HttpResponse.json({
+          items: [],
+          has_more: false,
+          next_cursor: null,
+          total_count: 0,
+          total_amount: "0",
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("No matched pairs.");
+    expect(screen.getByRole("button", { name: "All time" })).toHaveClass("bg-indigo-600");
+  });
+
+  it("clicking Last 30d passes date_from to the API", async () => {
+    const user = userEvent.setup();
+    const spy = vi.fn();
+    server.use(
+      http.get("/api/transactions", ({ request }) => {
+        spy(new URL(request.url).searchParams.get("date_from"));
+        return HttpResponse.json({
+          items: [],
+          has_more: false,
+          next_cursor: null,
+          total_count: 0,
+          total_amount: "0",
+        });
+      })
+    );
+    renderPage();
+    await screen.findByText("No matched pairs.");
+    await user.click(screen.getByRole("button", { name: "Last 30d" }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/))
+    );
   });
 
   it("re-match button calls POST /transfers/rematch and shows result", async () => {

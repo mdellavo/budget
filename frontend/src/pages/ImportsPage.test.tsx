@@ -21,6 +21,7 @@ const IMPORT_ITEM_COMPLETE = {
   imported_at: "2026-02-10T12:00:00",
   row_count: 50,
   enriched_rows: 50,
+  skipped_duplicates: 0,
   transaction_count: 48,
   status: "complete",
 };
@@ -32,6 +33,7 @@ const IMPORT_ITEM_IN_PROGRESS = {
   imported_at: "2026-02-11T10:00:00",
   row_count: 100,
   enriched_rows: 30,
+  skipped_duplicates: 0,
   transaction_count: 0,
   status: "in-progress",
 };
@@ -368,6 +370,86 @@ describe("ImportsPage", () => {
     renderPage();
     await screen.findByText("Aborted");
     expect(screen.getByRole("button", { name: /re-enrich/i })).toBeInTheDocument();
+  });
+
+  it("shows Delete button for each complete import row", async () => {
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    expect(screen.getByRole("button", { name: /^delete$/i })).toBeInTheDocument();
+  });
+
+  it("clicking Delete shows inline confirmation", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    expect(screen.getByText("Delete all transactions?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /yes, delete/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^cancel$/i })).toBeInTheDocument();
+  });
+
+  it("clicking Cancel in delete confirmation hides the confirmation", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      )
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    await screen.findByText("Delete all transactions?");
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+    await waitFor(() =>
+      expect(screen.queryByText("Delete all transactions?")).not.toBeInTheDocument()
+    );
+  });
+
+  it("confirming delete calls API and removes row from list", async () => {
+    const user = userEvent.setup();
+    let apiCalled = false;
+    server.use(
+      http.get("/api/imports", () =>
+        HttpResponse.json({
+          items: [IMPORT_ITEM_COMPLETE],
+          has_more: false,
+          next_cursor: null,
+        })
+      ),
+      http.delete(`/api/imports/${IMPORT_ITEM_COMPLETE.id}`, () => {
+        apiCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderPage();
+    await screen.findByText("Complete");
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    await screen.findByText("Delete all transactions?");
+    await user.click(screen.getByRole("button", { name: /yes, delete/i }));
+    expect(apiCalled).toBe(true);
+    await waitFor(() => expect(screen.queryByText("chase_2026.csv")).not.toBeInTheDocument());
   });
 
   it("shows in-progress enrichment text in the success panel immediately after import", async () => {

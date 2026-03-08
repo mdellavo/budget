@@ -76,6 +76,11 @@ export default function HelpPage() {
             </a>
           </li>
           <li>
+            <a href="#mixed-categories" className="hover:underline">
+              Mixed Categories
+            </a>
+          </li>
+          <li>
             <a href="#transfers" className="hover:underline">
               Transfers &amp; Double Counting
             </a>
@@ -603,11 +608,18 @@ export default function HelpPage() {
             <ul className="list-disc list-inside space-y-1">
               <li>
                 All imports are listed with filename, account, date, row count, transaction count,
+                <strong>Dupes</strong> (rows already in the database when the file was imported),
                 and status (complete / in-progress / aborted).
               </li>
               <li>
                 <strong>Re-enrich</strong> — run enrichment again on a completed import to
                 re-classify its transactions (e.g. after updating category or merchant data).
+              </li>
+              <li>
+                <strong>Delete</strong> — permanently removes the import record and all its
+                transactions. An inline confirmation (&ldquo;Delete all transactions? Yes /
+                Cancel&rdquo;) prevents accidental deletion. Transfer links from other imports that
+                pointed at deleted transactions are automatically cleared.
               </li>
               <li>Click the transaction count to view that import's transactions.</li>
             </ul>
@@ -685,6 +697,39 @@ export default function HelpPage() {
                 once. The Duplicates page catches cases where the description differs slightly or
                 where the same transaction appears in two different CSV files.
               </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Mixed Categories */}
+        <section id="mixed-categories">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">Mixed Categories</h2>
+          <div className="prose prose-sm text-gray-600 space-y-2">
+            <p>
+              The Mixed Categories page finds merchants whose transactions are spread across more
+              than one category — for example, &ldquo;Amazon&rdquo; appearing under both
+              &ldquo;Shopping&rdquo; and &ldquo;Groceries&rdquo;. Resolving these inconsistencies
+              makes category totals and reports more accurate.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                Each card shows the merchant name, the categories involved (as colour-coded badges),
+                and a table of every transaction for that merchant.
+              </li>
+              <li>
+                Use the row checkboxes or the header checkbox to select transactions. The header
+                checkbox supports an indeterminate state when only some rows are selected.
+              </li>
+              <li>
+                A sticky bar appears at the bottom when one or more transactions are selected. Enter
+                a new <strong>Category</strong> and/or <strong>Subcategory</strong> and click{" "}
+                <strong>Apply</strong> to bulk-reassign them.
+              </li>
+              <li>
+                After applying, the page reloads — merchants whose transactions now all share the
+                same category disappear from the list automatically.
+              </li>
+              <li>Excluded transactions are not counted when detecting mixed categories.</li>
             </ul>
           </div>
         </section>

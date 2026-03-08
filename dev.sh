@@ -20,12 +20,27 @@ fi
 
 tmux new-session -d -s "$SESSION" -x "$(tput cols)" -y "$(tput lines)"
 
-# Left pane — API
-tmux send-keys -t "$SESSION:0.0" "cd '$ROOT' && source venv/bin/activate && uvicorn budget.main:app --reload" Enter
+# Start Redis container if not already running
+if ! docker ps --format '{{.Names}}' | grep -q '^budget-redis$'; then
+  echo "Starting Redis container..."
+  docker run -d --name budget-redis -p 6379:6379 --rm redis:7-alpine
+fi
 
-# Right pane — Frontend
-tmux split-window -h -t "$SESSION:0"
-tmux send-keys -t "$SESSION:0.1" "cd '$ROOT/frontend' && npm run dev" Enter
+# Start rq-dashboard container if not already running
+if ! docker ps --format '{{.Names}}' | grep -q '^budget-rq-dashboard$'; then
+  echo "Starting rq-dashboard container..."
+  docker run -d --name budget-rq-dashboard -p 9181:9181 --rm \
+    eoranged/rq-dashboard --redis-url redis://host.docker.internal:6379
+fi
+
+# Create pane layout: three stacked horizontal splits
+tmux split-window -v -t "$SESSION:0.0"   # 0.0=top, 0.1=bottom
+tmux split-window -v -t "$SESSION:0.1"   # 0.0=top, 0.1=middle, 0.2=bottom
+
+# Send commands
+tmux send-keys -t "$SESSION:0.0" "cd '$ROOT' && source venv/bin/activate && uvicorn budget.main:app --reload" Enter
+tmux send-keys -t "$SESSION:0.1" "cd '$ROOT' && source venv/bin/activate && NO_PROXY=* watchfiles --filter python 'rq worker enrichment' budget" Enter
+tmux send-keys -t "$SESSION:0.2" "cd '$ROOT/frontend' && npm run dev" Enter
 
 tmux select-pane -t "$SESSION:0.0"
 tmux attach-session -t "$SESSION"

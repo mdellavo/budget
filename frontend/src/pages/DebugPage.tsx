@@ -15,6 +15,11 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(4)}`;
 }
 
+function formatCostPerRow(cost: number, rows: number): string {
+  if (rows === 0) return "—";
+  return `$${(cost / rows).toFixed(4)}`;
+}
+
 function formatNum(n: number): string {
   return n.toLocaleString();
 }
@@ -37,6 +42,7 @@ function BatchSubTable({ batches }: { batches: BatchItem[] }) {
           <th className="px-4 py-2 text-right">Input tokens</th>
           <th className="px-4 py-2 text-right">Output tokens</th>
           <th className="px-4 py-2 text-right">Cost</th>
+          <th className="px-4 py-2 text-right">Cost/row</th>
           <th className="px-4 py-2 text-center">Status</th>
           <th className="px-4 py-2 text-right">Duration</th>
         </tr>
@@ -50,6 +56,9 @@ function BatchSubTable({ batches }: { batches: BatchItem[] }) {
             <td className="px-4 py-2 text-right text-gray-600">{formatNum(b.output_tokens)}</td>
             <td className="px-4 py-2 text-right text-gray-600">
               {formatCost(calcCost(b.input_tokens, b.output_tokens))}
+            </td>
+            <td className="px-4 py-2 text-right text-gray-600">
+              {formatCostPerRow(calcCost(b.input_tokens, b.output_tokens), b.row_count)}
             </td>
             <td className="px-4 py-2 text-center">
               <span
@@ -98,14 +107,18 @@ function ImportRow({ imp }: { imp: ImportBatchSummary }) {
             {imp.status}
           </span>
         </td>
+        <td className="px-4 py-3 text-right text-gray-600">{imp.row_count}</td>
         <td className="px-4 py-3 text-right text-gray-600">{imp.batch_count}</td>
         <td className="px-4 py-3 text-right text-gray-600">{formatNum(imp.total_input_tokens)}</td>
         <td className="px-4 py-3 text-right text-gray-600">{formatNum(imp.total_output_tokens)}</td>
         <td className="px-4 py-3 text-right font-medium text-gray-800">{formatCost(cost)}</td>
+        <td className="px-4 py-3 text-right text-gray-600">
+          {formatCostPerRow(cost, imp.row_count)}
+        </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} className="bg-gray-50 border-b border-gray-200">
+          <td colSpan={9} className="bg-gray-50 border-b border-gray-200">
             <BatchSubTable batches={imp.batches} />
           </td>
         </tr>
@@ -127,6 +140,7 @@ export default function DebugPage() {
   }, []);
 
   const totalCost = data ? calcCost(data.total_input_tokens, data.total_output_tokens) : 0;
+  const totalRows = data ? data.imports.reduce((sum, imp) => sum + imp.row_count, 0) : 0;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -138,7 +152,23 @@ export default function DebugPage() {
       {data && (
         <>
           {/* Summary card */}
-          <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6 grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total rows</div>
+              <div className="text-xl font-semibold text-gray-800">{formatNum(totalRows)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                Estimated cost
+              </div>
+              <div className="text-xl font-semibold text-indigo-600">{formatCost(totalCost)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cost per row</div>
+              <div className="text-xl font-semibold text-indigo-600">
+                {formatCostPerRow(totalCost, totalRows)}
+              </div>
+            </div>
             <div>
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                 Total input tokens
@@ -161,13 +191,7 @@ export default function DebugPage() {
                 {formatNum(data.total_input_tokens + data.total_output_tokens)}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                Estimated cost
-              </div>
-              <div className="text-xl font-semibold text-indigo-600">{formatCost(totalCost)}</div>
-            </div>
-            <div className="col-span-2 sm:col-span-4 text-xs text-gray-400">
+            <div className="col-span-2 sm:col-span-3 text-xs text-gray-400">
               Pricing: claude-sonnet-4-6 — $3.00/MTok input, $15.00/MTok output. Cache tokens not
               broken out separately.
             </div>
@@ -185,10 +209,12 @@ export default function DebugPage() {
                     <th className="px-4 py-3 text-left">File</th>
                     <th className="px-4 py-3 text-left">Date</th>
                     <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-right">Rows</th>
                     <th className="px-4 py-3 text-right">Batches</th>
                     <th className="px-4 py-3 text-right">Input tokens</th>
                     <th className="px-4 py-3 text-right">Output tokens</th>
                     <th className="px-4 py-3 text-right">Cost</th>
+                    <th className="px-4 py-3 text-right">Cost/row</th>
                   </tr>
                 </thead>
                 <tbody>

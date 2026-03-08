@@ -882,6 +882,13 @@ class CsvImportQueries:
     async def get_by_id(self, import_id: int) -> CsvImport | None:
         return await self.db.get(CsvImport, import_id)
 
+    async def set_skipped_duplicates(self, csv_import_id: int, count: int) -> None:
+        await self.db.execute(
+            update(CsvImport)
+            .where(CsvImport.id == csv_import_id)
+            .values(skipped_duplicates=count)
+        )
+
     async def find_by_filename(self, filename: str) -> CsvImport | None:
         stmt = select(CsvImport).where(CsvImport.filename == filename)
         if self.user_id is not None:
@@ -970,6 +977,7 @@ class CsvImportQueries:
                     CsvImport.imported_at,
                     CsvImport.row_count,
                     CsvImport.enriched_rows,
+                    CsvImport.skipped_duplicates,
                     CsvImport.status,
                     account_name_expr.label("account"),
                     txn_count_expr.label("transaction_count"),
@@ -994,6 +1002,11 @@ class CsvImportQueries:
         existing: CsvImport | None,
     ) -> CsvImport:
         if existing:
+            await self.db.execute(
+                delete(EnrichmentBatch).where(
+                    EnrichmentBatch.csv_import_id == existing.id
+                )
+            )
             existing.account_id = account_id
             existing.imported_at = datetime.utcnow()
             existing.row_count = row_count
@@ -1034,10 +1047,41 @@ class CsvImportQueries:
 
     async def reset_for_reenrichment(self, import_id: int) -> None:
         await self.db.execute(
+            delete(EnrichmentBatch).where(EnrichmentBatch.csv_import_id == import_id)
+        )
+        await self.db.execute(
             update(CsvImport)
             .where(CsvImport.id == import_id)
             .values(status="in-progress", enriched_rows=0)
         )
+
+    async def delete(self, import_id: int) -> bool:
+        csv_import = await self.db.get(CsvImport, import_id)
+        if csv_import is None:
+            return False
+        if self.user_id is not None and csv_import.user_id != self.user_id:
+            return False
+
+        txn_ids_result = await self.db.execute(
+            select(Transaction.id).where(Transaction.csv_import_id == import_id)
+        )
+        txn_ids = [r[0] for r in txn_ids_result.all()]
+
+        if txn_ids:
+            await self.db.execute(
+                update(Transaction)
+                .where(Transaction.linked_transaction_id.in_(txn_ids))
+                .values(linked_transaction_id=None)
+            )
+            await self.db.execute(
+                delete(Transaction).where(Transaction.id.in_(txn_ids))
+            )
+
+        await self.db.execute(
+            delete(EnrichmentBatch).where(EnrichmentBatch.csv_import_id == import_id)
+        )
+        await self.db.delete(csv_import)
+        return True
 
 
 class MerchantQueries:
@@ -1208,14 +1252,14 @@ class MerchantQueries:
         canonical_name: str,
         canonical_location: str | None,
     ) -> None:
-        winner.name = canonical_name
-        winner.location = canonical_location
         await self.db.execute(
             update(Transaction)
             .where(Transaction.merchant_id.in_(loser_ids))
             .values(merchant_id=winner.id)
         )
         await self.db.execute(delete(Merchant).where(Merchant.id.in_(loser_ids)))
+        winner.name = canonical_name
+        winner.location = canonical_location
         await self.db.flush()
 
     async def find_or_create_for_enrichment(
@@ -1260,6 +1304,80 @@ class MerchantQueries:
                 await self.db.flush()
                 cache[name] = (cached_id, True)
         return cache[name][0]
+
+    async def find_mixed_category_merchants(self) -> list[dict]:
+        cond = [
+            Transaction.merchant_id.is_not(None),
+            Transaction.subcategory_id.is_not(None),
+            Transaction.is_excluded.is_(False),
+        ]
+        if self.user_id is not None:
+            cond.append(Transaction.user_id == self.user_id)
+
+        mixed_ids_stmt = (
+            select(Transaction.merchant_id)
+            .join(Subcategory, Transaction.subcategory_id == Subcategory.id)
+            .where(*cond)
+            .group_by(Transaction.merchant_id)
+            .having(func.count(func.distinct(Subcategory.category_id)) > 1)
+        )
+        result = await self.db.execute(mixed_ids_stmt)
+        merchant_ids = [r[0] for r in result.all()]
+        if not merchant_ids:
+            return []
+
+        txn_stmt = (
+            select(Transaction)
+            .options(
+                selectinload(Transaction.merchant),
+                selectinload(Transaction.subcategory).selectinload(
+                    Subcategory.category
+                ),
+                selectinload(Transaction.account),
+            )
+            .where(
+                Transaction.merchant_id.in_(merchant_ids),
+                Transaction.is_excluded.is_(False),
+            )
+            .order_by(Transaction.merchant_id, Transaction.date.desc())
+        )
+        if self.user_id is not None:
+            txn_stmt = txn_stmt.where(Transaction.user_id == self.user_id)
+
+        txn_result = await self.db.execute(txn_stmt)
+        transactions = txn_result.unique().scalars().all()
+
+        groups: dict[int, dict] = {}
+        for txn in transactions:
+            mid = txn.merchant_id
+            if mid not in groups:
+                groups[mid] = {
+                    "merchant_id": mid,
+                    "merchant_name": txn.merchant.name,
+                    "categories": set(),
+                    "transactions": [],
+                }
+            if txn.subcategory:
+                groups[mid]["categories"].add(txn.subcategory.category.name)
+            groups[mid]["transactions"].append(
+                {
+                    "id": txn.id,
+                    "date": txn.date.isoformat(),
+                    "description": txn.description,
+                    "amount": str(txn.amount),
+                    "category": (
+                        txn.subcategory.category.name if txn.subcategory else None
+                    ),
+                    "subcategory": txn.subcategory.name if txn.subcategory else None,
+                    "account": txn.account.name if txn.account else "",
+                }
+            )
+
+        return [
+            {**g, "categories": sorted(g["categories"])}
+            for g in groups.values()
+            if len(g["categories"]) > 1
+        ]
 
 
 class TransactionQueries:

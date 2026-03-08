@@ -135,6 +135,7 @@ export interface ImportItem {
   imported_at: string;
   row_count: number;
   enriched_rows: number;
+  skipped_duplicates: number;
   transaction_count: number;
   status: "in-progress" | "complete" | "aborted";
 }
@@ -158,6 +159,7 @@ export interface ImportProgress {
   csv_import_id: number;
   row_count: number;
   enriched_rows: number;
+  skipped_duplicates: number;
   complete: boolean;
   aborted: boolean;
 }
@@ -332,6 +334,27 @@ export interface EnrichmentDebugResponse {
   imports: ImportBatchSummary[];
   total_input_tokens: number;
   total_output_tokens: number;
+}
+
+export interface MixedCategoryTransaction {
+  id: number;
+  date: string;
+  description: string;
+  amount: string;
+  category: string | null;
+  subcategory: string | null;
+  account: string;
+}
+
+export interface MixedCategoryMerchant {
+  merchant_id: number;
+  merchant_name: string;
+  categories: string[];
+  transactions: MixedCategoryTransaction[];
+}
+
+export interface MixedCategoryResponse {
+  groups: MixedCategoryMerchant[];
 }
 
 export interface OverviewData {

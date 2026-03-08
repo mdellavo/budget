@@ -13,6 +13,7 @@ import type {
   ImportProgress,
   MerchantItem,
   MerchantsResponse,
+  MixedCategoryResponse,
   MonthListResponse,
   MonthlyReport,
   OverviewData,
@@ -554,6 +555,25 @@ export async function abortImport(
   );
 }
 
+export async function deleteImport(importId: number): Promise<void> {
+  const res = await fetch(`${BASE}/imports/${importId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    handle401();
+    throw new ApiResponseError(401, "Unauthorized");
+  }
+  if (!res.ok && res.status !== 204) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {} // eslint-disable-line no-empty
+    throw new ApiResponseError(res.status, detail);
+  }
+}
+
 export interface CategoryTrendFilters {
   date_from?: string; // "YYYY-MM"
   date_to?: string; // "YYYY-MM"
@@ -739,5 +759,11 @@ export async function rematchTransfers(): Promise<{ pairs_linked: number }> {
 export async function getEnrichmentDebug(): Promise<EnrichmentDebugResponse> {
   return handleResponse<EnrichmentDebugResponse>(
     await fetch(`${BASE}/debug/enrichment-batches`, { headers: authHeaders() })
+  );
+}
+
+export async function getMixedCategoryMerchants(): Promise<MixedCategoryResponse> {
+  return handleResponse<MixedCategoryResponse>(
+    await fetch(`${BASE}/merchants/mixed-categories`, { headers: authHeaders() })
   );
 }

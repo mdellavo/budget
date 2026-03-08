@@ -3,6 +3,11 @@ resource "aws_cloudwatch_log_group" "api" {
   retention_in_days = 30
 }
 
+resource "aws_cloudwatch_log_group" "redis" {
+  name              = "/ecs/${var.app_name}-redis"
+  retention_in_days = 7
+}
+
 # ALB
 resource "aws_lb" "api" {
   name               = "${var.app_name}-${var.environment}-api"
@@ -69,6 +74,12 @@ resource "aws_ecs_task_definition" "api" {
           protocol      = "tcp"
         }
       ]
+      environment = [
+        {
+          name  = "REDIS_URL"
+          value = "redis://localhost:6379"
+        }
+      ]
       secrets = [
         {
           name      = "DATABASE_URL"
@@ -93,6 +104,25 @@ resource "aws_ecs_task_definition" "api" {
           awslogs-group         = aws_cloudwatch_log_group.api.name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "ecs"
+        }
+      }
+    },
+    {
+      name      = "redis"
+      image     = "redis:7-alpine"
+      essential = false
+      portMappings = [
+        {
+          containerPort = 6379
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.redis.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "redis"
         }
       }
     }

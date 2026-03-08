@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .ai import ENRICH_BATCH_SIZE, enricher
@@ -100,6 +100,34 @@ async def _run_enrichment(
         for i in range(0, len(enrich_input), ENRICH_BATCH_SIZE)
     ]
     sem = asyncio.Semaphore(3)
+
+    # Pre-count rows whose fingerprints already exist in the DB (duplicates)
+    fp_list: list[str] = []
+    for row in rows:
+        try:
+            d = parse_date(row[date_col])
+            a = parse_amount(row[amount_col])
+            if account_type == "Credit Card":
+                a = -a
+            raw = row[desc_col].strip() if desc_col else None
+            fp_list.append(_make_fingerprint(account_id, d, a, raw))
+        except (ValueError, InvalidOperation):
+            pass
+    if fp_list:
+        async with AsyncSessionLocal() as db:
+            dup_count = (
+                await db.scalar(
+                    select(func.count())
+                    .select_from(Transaction)
+                    .where(
+                        Transaction.user_id == user_id,
+                        Transaction.fingerprint.in_(fp_list),
+                    )
+                )
+                or 0
+            )
+            await CsvImportQueries(db).set_skipped_duplicates(csv_import_id, dup_count)
+            await db.commit()
 
     async def fetch_batch(batch, batch_num):
         async with AsyncSessionLocal() as db:

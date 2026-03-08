@@ -9,3 +9,8 @@ python-jose[cryptography]
 bcrypt
 google-auth
 requests
+redis
+rq
+rq-dashboard
+watchfiles
+alembic

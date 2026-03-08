@@ -1,4 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
+
+declare const Plotly: {
+  react: (el: HTMLElement, data: unknown[], layout: unknown, config: unknown) => void;
+};
 import { listTransactions, updateTransaction, rematchTransfers } from "../api/client";
 import HelpIcon from "../components/HelpIcon";
 import type { TransactionItem } from "../types";
@@ -10,6 +15,29 @@ function formatAmount(amount: string): { text: string; positive: boolean } {
       Math.abs(n)
     ),
     positive: n >= 0,
+  };
+}
+
+const PRESETS = [
+  { label: "All time", days: null },
+  { label: "Last 30d", days: 30 },
+  { label: "Last 3m", days: 90 },
+  { label: "Year to date", days: "ytd" as const },
+  { label: "Last year", days: 365 },
+] as const;
+
+function presetDates(days: number | null | "ytd"): { date_from: string; date_to: string } {
+  if (days === null) return { date_from: "", date_to: "" };
+  const to = new Date();
+  const from = new Date();
+  if (days === "ytd") {
+    from.setMonth(0, 1);
+  } else {
+    from.setDate(from.getDate() - days);
+  }
+  return {
+    date_from: from.toISOString().slice(0, 10),
+    date_to: to.toISOString().slice(0, 10),
   };
 }
 
@@ -91,6 +119,33 @@ export default function TransfersPage() {
   const [unlinking, setUnlinking] = useState<Set<number>>(new Set());
   const [rematching, setRematching] = useState(false);
   const [rematchMsg, setRematchMsg] = useState<string | null>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const dateFrom = searchParams.get("date_from") ?? "";
+  const dateTo = searchParams.get("date_to") ?? "";
+
+  function setDates(from: string, to: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (from) next.set("date_from", from);
+        else next.delete("date_from");
+        if (to) next.set("date_to", to);
+        else next.delete("date_to");
+        return next;
+      },
+      { replace: true }
+    );
+  }
+
+  const activePresetDays: number | null | "ytd" | undefined = (() => {
+    for (const p of PRESETS) {
+      const { date_from, date_to } = presetDates(p.days);
+      if (date_from === dateFrom && date_to === dateTo) return p.days;
+    }
+    return undefined;
+  })();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,6 +161,8 @@ export default function TransfersPage() {
           sort_by: "date",
           sort_dir: "desc",
           after,
+          ...(dateFrom ? { date_from: dateFrom } : {}),
+          ...(dateTo ? { date_to: dateTo } : {}),
         });
         all.push(...res.items);
         if (!res.has_more || res.next_cursor == null) break;
@@ -117,11 +174,56 @@ export default function TransfersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const el = chartRef.current;
+    if (!el || !transfers) return;
+
+    const byId = new Map(transfers.map((t) => [t.id, t]));
+    const seen = new Set<number>();
+    const flowMap = new Map<string, number>();
+    for (const tx of transfers) {
+      if (seen.has(tx.id) || tx.linked_transaction_id == null) continue;
+      const other = byId.get(tx.linked_transaction_id);
+      if (!other || seen.has(other.id)) continue;
+      const debit = parseFloat(tx.amount) < 0 ? tx : other;
+      const credit = parseFloat(tx.amount) >= 0 ? tx : other;
+      const key = `${debit.account}||${credit.account}`;
+      flowMap.set(key, (flowMap.get(key) ?? 0) + Math.abs(parseFloat(debit.amount)));
+      seen.add(tx.id);
+      seen.add(other.id);
+    }
+    if (flowMap.size === 0) return;
+
+    const nodes = Array.from(new Set([...flowMap.keys()].flatMap((k) => k.split("||"))));
+    const sources: number[] = [],
+      targets: number[] = [],
+      values: number[] = [];
+    for (const [key, value] of flowMap) {
+      const [from, to] = key.split("||");
+      sources.push(nodes.indexOf(from));
+      targets.push(nodes.indexOf(to));
+      values.push(value);
+    }
+    Plotly.react(
+      el,
+      [
+        {
+          type: "sankey",
+          orientation: "h",
+          node: { label: nodes, pad: 20, thickness: 20 },
+          link: { source: sources, target: targets, value: values },
+        },
+      ],
+      { font: { size: 13 }, margin: { t: 10, b: 10, l: 10, r: 10 } },
+      { responsive: true, displayModeBar: false }
+    );
+  }, [transfers]);
 
   async function handleUnlink(txId: number, linkedId: number) {
     setUnlinking((prev) => new Set([...prev, txId, linkedId]));
@@ -224,6 +326,43 @@ export default function TransfersPage() {
         </div>
       </div>
 
+      <div className="mb-6 flex flex-wrap items-end gap-3">
+        <div className="flex gap-1">
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => {
+                const d = presetDates(p.days);
+                setDates(d.date_from, d.date_to);
+              }}
+              className={`px-3 py-1.5 text-sm rounded border ${
+                activePresetDays === p.days
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDates(e.target.value, dateTo)}
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+          <span className="text-sm text-gray-400">to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDates(dateFrom, e.target.value)}
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+        </div>
+      </div>
+
       {loading && <div className="text-sm text-gray-500">Loading…</div>}
 
       {error && (
@@ -234,6 +373,13 @@ export default function TransfersPage() {
 
       {!loading && !error && transfers !== null && (
         <>
+          {matched.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-4 mb-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-3">Transfer Flows</h2>
+              <div ref={chartRef} style={{ width: "100%", height: 320 }} />
+            </div>
+          )}
+
           {/* Matched Pairs */}
           <section className="mb-8">
             <h2 className="text-base font-semibold text-gray-700 mb-3">

@@ -5,6 +5,7 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
 ## Stack
 
 - **Backend** — FastAPI, SQLAlchemy (async), SQLite, Anthropic SDK
+- **Cache** — Redis 7
 - **Frontend** — React, React Router, Tailwind CSS, Vite
 
 ## Features
@@ -16,6 +17,7 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
 - Real-time progress bar shows enrichment status (rows processed / total)
 - Abort an in-progress enrichment job at any time
 - Re-enrich an existing import to re-classify transactions with fresh AI output
+- **Delete import** — removes a CSV import and all its transactions; transfer links to deleted transactions are cleared automatically
 - Import history with per-import status, row counts, and detected column mapping
 - **Smart deduplication** — each transaction is fingerprinted by (account, date, amount, description); re-importing an overlapping CSV skips already-present rows and preserves their enrichment data
 
@@ -35,6 +37,10 @@ A personal finance app that imports bank/credit card CSVs, auto-categorizes tran
 ### Duplicate Report
 - **Duplicate Transactions page** — surfaces groups of transactions that share the same account, date, and amount; each group is shown as a card with all matching rows
 - Exclude individual rows directly from the Duplicates page to clean up accidental re-imports without deleting data
+
+### Mixed Categories
+- **Mixed Categories page** — finds merchants whose transactions span more than one category (e.g. "Amazon" under both "Shopping" and "Groceries")
+- Select transactions by merchant card and bulk-reassign them to a consistent category/subcategory in one action; resolved merchants disappear from the list automatically
 
 ### Overview
 - Stat cards: total transactions, income, expenses, net change, and savings rate
@@ -130,6 +136,7 @@ Copy `.env.example` to `.env` and fill in:
 | `ANTHROPIC_API_KEY` | Yes | Claude API key from [console.anthropic.com](https://console.anthropic.com) |
 | `SECRET_KEY` | Yes | Secret for JWT signing — generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `GOOGLE_CLIENT_ID` | No | Enables Google OAuth sign-in (see below) |
+| `REDIS_URL` | No | Redis connection URL — defaults to `redis://localhost:6379`; set automatically by docker-compose |
 
 For the frontend, copy `frontend/.env.example` to `frontend/.env` (or set at build time):
 
@@ -145,7 +152,7 @@ cp .env.example .env   # fill in API keys
 docker compose up --build
 ```
 
-The app runs at `http://localhost` (frontend) and `http://localhost:8000` (API). The database is stored in a named volume (`budget_data`) so it persists across restarts.
+The app runs at `http://localhost` (frontend) and `http://localhost:8000` (API). The database is stored in a named volume (`budget_data`) so it persists across restarts. Redis and the enrichment worker start automatically as part of the same compose stack.
 
 ### Local development
 
@@ -157,6 +164,27 @@ source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in API keys
 uvicorn budget.main:app --reload
+```
+
+The API automatically runs `alembic upgrade head` on startup, so the database schema is always up to date. For an existing database that predates Alembic, stamp it once before starting the app:
+
+```bash
+alembic stamp head
+```
+
+To generate a new migration after changing `budget/models.py`:
+
+```bash
+alembic revision --autogenerate -m "describe change"
+```
+
+#### Worker (required for CSV enrichment)
+
+In a separate terminal (or use `./dev.sh` which starts it automatically in tmux):
+
+```bash
+source venv/bin/activate
+rq worker enrichment
 ```
 
 #### Frontend
